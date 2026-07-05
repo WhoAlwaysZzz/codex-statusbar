@@ -133,6 +133,7 @@ class CodexSessionWatcher:
         self.status_path = state_dir / "status.json"
         self.appserver_status_path = state_dir / "appserver_status.json"
         self.guard_status_path = state_dir / "guard_status.json"
+        self.watchdog_status_path = state_dir / "watchdog_status.json"
         self.events_path = state_dir / "events.jsonl"
         self.actions_path = state_dir / "actions.jsonl"
         self.stale_seconds = stale_seconds
@@ -787,9 +788,18 @@ class CodexSessionWatcher:
 
     def _external_snapshot(self) -> StatusSnapshot | None:
         snapshots: list[tuple[float, StatusSnapshot]] = []
-        for path in [self.appserver_status_path, self.guard_status_path]:
+        for path in [
+            self.appserver_status_path,
+            self.guard_status_path,
+            self.watchdog_status_path,
+        ]:
             snapshot = self._snapshot_from_status_file(path)
             if not snapshot:
+                continue
+            if path == self.watchdog_status_path and not (
+                snapshot.needs_human
+                or snapshot.state in {"recovering", "reconnecting", "failed", "waiting"}
+            ):
                 continue
             try:
                 mtime = path.stat().st_mtime

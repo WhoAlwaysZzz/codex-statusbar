@@ -16,6 +16,33 @@ powershell -ExecutionPolicy Bypass -File .\run-statusbar.ps1
 
 窗口会常驻置顶，可以拖动。它只读取本地文件，不会自动发送消息、切代理、审批命令或修改 Codex 配置。
 
+如果本目录已经在 PATH 里，也可以直接：
+
+```powershell
+codex-statusbar
+```
+
+## 全局 Desktop/session 守护
+
+这是日常应该先试的自动恢复入口。它会看所有最近活动的本地 Codex session；只有明确检测到 stream/network 类中断时，才执行极有限恢复：
+
+```powershell
+codex-watchdog
+```
+
+它现在只会做两种自动动作：
+
+- turn 已经开始后断：`codex exec resume <session_uuid> --json "继续"`
+- turn 还没开始就断，且能读到上一条用户消息：`codex exec resume <session_uuid> --json "<上一条用户消息>"`
+
+登录、额度、权限、approval、危险操作等不会自动处理，只写日志并让状态栏提示人工介入。
+
+先只看它会不会动手、不真正恢复：
+
+```powershell
+codex-watchdog --once --dry-run
+```
+
 ## 自动恢复运行器
 
 如果希望让工具托管一个 Codex CLI 任务，并在连接层失败时做机械恢复，用：
