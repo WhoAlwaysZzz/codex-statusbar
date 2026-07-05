@@ -35,6 +35,8 @@ codex-watchdog
 - turn 已经开始后断：`codex exec resume <session_uuid> --json "继续"`
 - turn 还没开始就断，且能读到上一条用户消息：`codex exec resume <session_uuid> --json "<上一条用户消息>"`
 
+默认会先让 Codex 自己重连 120 秒；同一个 session 持续 reconnect 超过这个时间才会自动恢复。可以用 `--reconnect-grace-seconds 60` 调整。
+
 登录、额度、权限、approval、危险操作等不会自动处理，只写日志并让状态栏提示人工介入。
 
 先只看它会不会动手、不真正恢复：

@@ -122,6 +122,7 @@ class DesktopSessionWatchdog:
         poll_seconds: float,
         max_recoveries_per_session: int,
         cooldown_seconds: int,
+        reconnect_grace_seconds: int,
         continue_prompt: str,
         recent_hours: float,
         dry_run: bool,
@@ -134,6 +135,7 @@ class DesktopSessionWatchdog:
         self.poll_seconds = max(1.0, poll_seconds)
         self.max_recoveries_per_session = max(0, max_recoveries_per_session)
         self.cooldown_seconds = max(0, cooldown_seconds)
+        self.reconnect_grace_seconds = max(0, reconnect_grace_seconds)
         self.continue_prompt = continue_prompt
         self.recent_hours = max(0.1, recent_hours)
         self.dry_run = dry_run
@@ -180,6 +182,7 @@ class DesktopSessionWatchdog:
             if snapshot.state == "reconnecting" and not snapshot.needs_human:
                 self._recover(snapshot, info, watched)
                 return self.state
+            self._clear_reconnect_observation(info.session_id)
 
         self._set_state(
             "watching",
@@ -242,7 +245,28 @@ class DesktopSessionWatchdog:
         recovery = self.recovery_state.get(info.session_id, {})
         count = int(recovery.get("count") or 0)
         last_at = float(recovery.get("last_at") or 0)
+        first_seen_at = float(recovery.get("first_reconnecting_at") or 0)
         now = time.time()
+
+        if not first_seen_at:
+            recovery["first_reconnecting_at"] = now
+            self.recovery_state[info.session_id] = recovery
+            self._save_recovery_state()
+            first_seen_at = now
+
+        observed_for = now - first_seen_at
+        if observed_for < self.reconnect_grace_seconds:
+            remaining = int(self.reconnect_grace_seconds - observed_for)
+            self._set_state(
+                "watching",
+                "Watchdog observing reconnect",
+                f"Letting Codex retry by itself for {remaining}s before recovery.",
+                info,
+                watched,
+                error_info=snapshot.error_info,
+            )
+            self._record_action("skip", "reconnect_grace_period", snapshot, info)
+            return
 
         if count >= self.max_recoveries_per_session:
             self._set_state(
@@ -289,6 +313,7 @@ class DesktopSessionWatchdog:
         recovery["count"] = count + 1
         recovery["last_at"] = now
         recovery["last_reason"] = reason
+        recovery["first_reconnecting_at"] = 0
         self.recovery_state[info.session_id] = recovery
         self._save_recovery_state()
 
@@ -341,6 +366,14 @@ class DesktopSessionWatchdog:
         command.extend(self.codex_args)
         command.extend([info.resume_id, prompt])
         return command
+
+    def _clear_reconnect_observation(self, session_id: str) -> None:
+        recovery = self.recovery_state.get(session_id)
+        if not recovery or not recovery.get("first_reconnecting_at"):
+            return
+        recovery["first_reconnecting_at"] = 0
+        self.recovery_state[session_id] = recovery
+        self._save_recovery_state()
 
     def _run_recovery_command(
         self,
@@ -449,6 +482,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--poll-seconds", type=float, default=3.0)
     parser.add_argument("--max-recoveries-per-session", type=int, default=2)
     parser.add_argument("--cooldown-seconds", type=int, default=90)
+    parser.add_argument("--reconnect-grace-seconds", type=int, default=120)
     parser.add_argument("--continue-prompt", default="继续")
     parser.add_argument("--recent-hours", type=float, default=24.0)
     parser.add_argument("--codex-arg", action="append", default=[])
@@ -467,6 +501,7 @@ def main(argv: list[str]) -> int:
         poll_seconds=args.poll_seconds,
         max_recoveries_per_session=args.max_recoveries_per_session,
         cooldown_seconds=args.cooldown_seconds,
+        reconnect_grace_seconds=args.reconnect_grace_seconds,
         continue_prompt=args.continue_prompt,
         recent_hours=args.recent_hours,
         dry_run=args.dry_run,

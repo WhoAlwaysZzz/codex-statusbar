@@ -84,6 +84,63 @@ class WatchdogRecoveryTests(unittest.TestCase):
             self.assertIn("start_recovery", actions)
             self.assertIn("dry_run", actions)
 
+    def test_reconnect_grace_period_waits_before_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "05"
+            session_dir.mkdir(parents=True)
+            session = (
+                session_dir
+                / "rollout-2026-07-05T10-00-00-019f2b3c-518b-7e41-8b66-a8c3bbc3f64a.jsonl"
+            )
+            self._write_jsonl(
+                session,
+                [
+                    {"type": "session_meta", "payload": {"cwd": raw}},
+                    {
+                        "timestamp": "2026-07-05T00:00:00Z",
+                        "type": "event_msg",
+                        "payload": {"type": "user_message", "message": "做一件事"},
+                    },
+                    {
+                        "timestamp": "2026-07-05T00:00:01Z",
+                        "type": "event_msg",
+                        "payload": {"type": "task_started"},
+                    },
+                    {
+                        "timestamp": "2026-07-05T00:00:02Z",
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "error",
+                            "codex_error_info": "ResponseStreamDisconnected",
+                        },
+                    },
+                ],
+            )
+            watchdog = DesktopSessionWatchdog(
+                codex_home=codex_home,
+                state_dir=root / "state",
+                codex_bin="codex",
+                poll_seconds=1,
+                max_recoveries_per_session=2,
+                cooldown_seconds=0,
+                reconnect_grace_seconds=120,
+                continue_prompt="继续",
+                recent_hours=24,
+                dry_run=True,
+                codex_args=[],
+                skip_git_repo_check=True,
+            )
+
+            state = watchdog.scan_once()
+
+            self.assertEqual(state.state, "watching")
+            self.assertEqual(state.label, "Watchdog observing reconnect")
+            actions = (root / "state" / "actions.jsonl").read_text(encoding="utf-8")
+            self.assertIn("reconnect_grace_period", actions)
+            self.assertNotIn("start_recovery", actions)
+
     def _watchdog(
         self,
         root: Path,
@@ -97,6 +154,7 @@ class WatchdogRecoveryTests(unittest.TestCase):
             poll_seconds=1,
             max_recoveries_per_session=2,
             cooldown_seconds=0,
+            reconnect_grace_seconds=0,
             continue_prompt="继续",
             recent_hours=24,
             dry_run=True,
