@@ -29,7 +29,6 @@ APP_NAME = "Codex Statusbar"
 DEFAULT_STALE_SECONDS = 300
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_DESKTOP_EVENT_SECONDS = 180
-DEFAULT_STREAM_STALL_SECONDS = 25
 MAX_FILES = 60
 MAX_FILE_BYTES = 1_500_000
 
@@ -355,36 +354,7 @@ class CodexSessionWatcher:
         desktop_log = self._desktop_file_log_snapshot(base)
         if desktop_log:
             return desktop_log
-        if base and self._looks_like_active_stalled_stream(base):
-            age = int(base.last_event_age_seconds or 0)
-            return StatusSnapshot(
-                state="reconnecting",
-                label="Desktop stream stalled",
-                detail=f"Desktop has an active turn, but no session event for {age}s.",
-                session_id=base.session_id,
-                source_file=base.source_file,
-                cwd=base.cwd,
-                last_event_type=base.last_event_type,
-                last_event_age_seconds=base.last_event_age_seconds,
-                updated_at=now_iso(),
-                needs_human=False,
-                recommended_action="Check network/proxy if this does not recover shortly.",
-                error_info="active_stream_without_session_progress",
-            )
         return None
-
-    def _looks_like_active_stalled_stream(self, base: StatusSnapshot) -> bool:
-        if base.state in {"completed", "failed", "waiting", "idle"}:
-            return False
-        if base.last_event_age_seconds is None:
-            return False
-        if base.last_event_age_seconds < DEFAULT_STREAM_STALL_SECONDS:
-            return False
-        # Tool execution can legitimately be quiet. Do not turn local commands
-        # into reconnecting unless a log source reported a real network issue.
-        if base.state == "executing":
-            return False
-        return True
 
     def _internal_log_snapshot(self, base: StatusSnapshot | None) -> StatusSnapshot | None:
         db_path = self.codex_home / "logs_2.sqlite"
@@ -415,7 +385,7 @@ class CodexSessionWatcher:
             text = str(body or "")
             target_text = str(target or "")
             level_text = str(level or "")
-            if self._is_internal_reconnect_log(target_text, text):
+            if self._is_internal_reconnect_log(target_text, level_text, text, base):
                 attempt = self._extract_reconnect_attempt(text)
                 detail = "Codex Desktop is reconnecting"
                 if attempt:
@@ -437,7 +407,7 @@ class CodexSessionWatcher:
                     recommended_action="Network/proxy path is unstable; wait briefly or switch proxy node.",
                     error_info=text[:500],
                 )
-            if self._is_internal_human_blocker(target_text, level_text, text):
+            if self._is_internal_human_blocker(target_text, level_text, text, base):
                 return StatusSnapshot(
                     state="failed",
                     label="Desktop needs attention",
@@ -466,7 +436,7 @@ class CodexSessionWatcher:
                 timestamp = self._timestamp_from_log_line(line)
                 if timestamp and timestamp.timestamp() < cutoff:
                     continue
-                if self._is_desktop_network_line(line):
+                if self._is_desktop_network_line(line, base):
                     age = (
                         max(0.0, datetime.now(timezone.utc).timestamp() - timestamp.timestamp())
                         if timestamp
@@ -516,22 +486,94 @@ class CodexSessionWatcher:
             return None
         return parse_timestamp(line[:24].replace("Z", "+00:00"))
 
-    def _is_internal_reconnect_log(self, target: str, text: str) -> bool:
+    def _is_internal_reconnect_log(
+        self,
+        target: str,
+        level: str,
+        text: str,
+        base: StatusSnapshot | None,
+    ) -> bool:
+        if level.upper() not in {"WARN", "ERROR"}:
+            return False
+        if base and base.state in {"completed", "failed", "waiting", "idle"}:
+            return False
+        if not self._log_matches_current_session(base, text):
+            return False
+
         lower = text.lower()
         target_lower = target.lower()
-        return (
-            "remote_control::websocket" in target_lower
-            and ("reconnect_attempt=" in lower or "failed to connect" in lower)
-        ) or (
-            "response_stream" in lower
-            or "responsestreamdisconnected" in lower
-            or "responsestreamconnectionfailed" in lower
+        if any(
+            ignored in target_lower
+            for ignored in [
+                "remote_control::websocket",
+                "codex_api::sse::responses",
+                "codex_core::stream_events_utils",
+            ]
+        ):
+            return False
+
+        is_relevant_target = any(
+            marker in target_lower
+            for marker in [
+                "codex_client::transport",
+                "codex_core::client",
+                "codex_core::codex",
+                "codex_core::session",
+                "codex_core::turn",
+            ]
+        )
+        if not is_relevant_target:
+            return False
+
+        return any(
+            marker in lower
+            for marker in [
+                "responsestreamdisconnected",
+                "responsestreamconnectionfailed",
+                "httpconnectionfailed",
+                "stream disconnected",
+                "stream failed",
+                "net::err_connection",
+                "err_connection_timed_out",
+                "err_timed_out",
+                "connection timed out",
+            ]
         )
 
-    def _is_internal_human_blocker(self, target: str, level: str, text: str) -> bool:
+    def _log_matches_current_session(self, base: StatusSnapshot | None, text: str) -> bool:
+        keys = self._session_match_keys(base)
+        if not keys:
+            return False
+        lower = text.lower()
+        return any(key.lower() in lower for key in keys)
+
+    def _session_match_keys(self, base: StatusSnapshot | None) -> list[str]:
+        if not base or not base.session_id:
+            return []
+        keys = [base.session_id]
+        uuid_match = re.search(
+            r"(019[0-9a-f]{5,}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+            base.session_id,
+            re.IGNORECASE,
+        )
+        if uuid_match:
+            keys.append(uuid_match.group(1))
+        return list(dict.fromkeys(keys))
+
+    def _is_internal_human_blocker(
+        self,
+        target: str,
+        level: str,
+        text: str,
+        base: StatusSnapshot | None,
+    ) -> bool:
         if target.lower() == "feedback_tags":
             return False
         if level.upper() not in {"WARN", "ERROR"}:
+            return False
+        if base and base.state in {"completed", "idle"}:
+            return False
+        if not self._log_matches_current_session(base, text):
             return False
         lower = text.lower()
         return any(
@@ -546,7 +588,11 @@ class CodexSessionWatcher:
             ]
         )
 
-    def _is_desktop_network_line(self, line: str) -> bool:
+    def _is_desktop_network_line(self, line: str, base: StatusSnapshot | None) -> bool:
+        if base and base.state in {"completed", "failed", "waiting", "idle"}:
+            return False
+        if not self._log_matches_current_session(base, line):
+            return False
         lower = line.lower()
         return any(
             marker in lower
