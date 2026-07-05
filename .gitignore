@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Local/generated research and probe outputs.
+work/
+
+# Runtime state is written under %LOCALAPPDATA%, but keep this out if a custom
+# state dir is pointed into the repo during tests.
+.codex-statusbar/
