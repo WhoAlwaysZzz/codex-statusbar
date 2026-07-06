@@ -7,3 +7,8 @@ work/
 # Runtime state is written under %LOCALAPPDATA%, but keep this out if a custom
 # state dir is pointed into the repo during tests.
 .codex-statusbar/
+
+# .NET launcher build outputs.
+outputs/codex-statusbar/launcher/bin/
+outputs/codex-statusbar/launcher/obj/
+outputs/codex-statusbar/launcher/publish/

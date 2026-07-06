@@ -7,7 +7,7 @@
 打开状态栏：
 
 ```powershell
-Start-Process codex-statusbar
+Start-Process codex-stat
 ```
 
 打开全局守护：
@@ -19,7 +19,7 @@ Start-Process -WindowStyle Hidden codex-watchdog
 如果只是临时测试，也可以直接运行：
 
 ```powershell
-codex-statusbar
+codex-stat
 codex-watchdog
 ```
 
@@ -30,8 +30,10 @@ codex-watchdog
 入口：
 
 ```powershell
-codex-statusbar [参数]
+codex-stat [参数]
 ```
+
+`codex-statusbar` 也可以用，等价于 `codex-stat`。
 
 参数：
 
@@ -46,8 +48,8 @@ codex-statusbar [参数]
 常用例子：
 
 ```powershell
-codex-statusbar --once
-codex-statusbar --stale-seconds 600
+codex-stat --once
+codex-stat --stale-seconds 600
 ```
 
 ## watchdog 参数
@@ -87,6 +89,6 @@ codex-watchdog --max-recoveries-per-session 1
 ## 日常推荐
 
 ```powershell
-Start-Process codex-statusbar
+Start-Process codex-stat
 Start-Process -WindowStyle Hidden codex-watchdog
 ```
