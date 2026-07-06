@@ -52,6 +52,34 @@ codex-stat --once
 codex-stat --stale-seconds 600
 ```
 
+## WSL Codex CLI
+
+statusbar 是 Windows 窗口，但可以读取 WSL 里的 Codex CLI session。
+
+你的默认 WSL 是 `Ubuntu`，WSL 用户是 `zzz07`，所以 WSL Codex home 是：
+
+```text
+\\wsl.localhost\Ubuntu\home\zzz07\.codex
+```
+
+只看 WSL Codex CLI：
+
+```powershell
+Start-Process codex-stat -ArgumentList '--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'
+```
+
+同时看 Windows Codex 和 WSL Codex CLI：
+
+```powershell
+Start-Process codex-stat -ArgumentList '--codex-home',"$env:USERPROFILE\.codex",'--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'
+```
+
+从 WSL 里启动 Windows statusbar：
+
+```bash
+powershell.exe -NoProfile -Command 'Start-Process codex-stat -ArgumentList "--codex-home","\\\\wsl.localhost\\Ubuntu\\home\\zzz07\\.codex"'
+```
+
 ## watchdog 参数
 
 入口：

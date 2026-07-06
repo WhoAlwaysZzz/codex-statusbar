@@ -31,6 +31,24 @@ class MultiSessionBoardTests(unittest.TestCase):
             status_all = json.loads((root / "state" / "status_all.json").read_text(encoding="utf-8"))
             self.assertEqual(len(status_all["snapshots"]), 2)
 
+    def test_scan_all_reads_multiple_codex_homes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            home_a = root / "windows-codex"
+            home_b = root / "wsl-codex"
+            session_dir_a = home_a / "sessions" / "2026" / "07" / "06"
+            session_dir_b = home_b / "sessions" / "2026" / "07" / "06"
+            session_dir_a.mkdir(parents=True)
+            session_dir_b.mkdir(parents=True)
+            self._write_session(session_dir_a / "rollout-session-a.jsonl", "session-a", "working")
+            self._write_session(session_dir_b / "rollout-session-b.jsonl", "session-b", "executing")
+
+            watcher = CodexSessionWatcher([home_a, home_b], root / "state")
+            board = watcher.scan_all()
+
+            session_ids = {snapshot.session_id for snapshot in board.snapshots}
+            self.assertEqual(session_ids, {"session-a", "session-b"})
+
     def test_old_completed_hides_unless_it_is_the_last_task(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

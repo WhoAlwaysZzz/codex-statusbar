@@ -268,12 +268,14 @@ def session_id_from_path(path: Path) -> str:
 class CodexSessionWatcher:
     def __init__(
         self,
-        codex_home: Path,
+        codex_home: Path | list[Path],
         state_dir: Path,
         stale_seconds: int = DEFAULT_STALE_SECONDS,
     ) -> None:
-        self.codex_home = codex_home
-        self.sessions_dir = codex_home / "sessions"
+        self.codex_homes = codex_home if isinstance(codex_home, list) else [codex_home]
+        self.codex_homes = [home.expanduser() for home in self.codex_homes]
+        self.codex_home = self.codex_homes[0]
+        self.sessions_dir = self.codex_home / "sessions"
         self.state_dir = state_dir
         self.status_path = state_dir / "status.json"
         self.status_all_path = state_dir / "status_all.json"
@@ -299,7 +301,7 @@ class CodexSessionWatcher:
             snapshot = self._desktop_snapshot(None) or StatusSnapshot(
                 state="idle",
                 label="No recent Codex session",
-                detail=f"Watching {self.sessions_dir}",
+                detail=f"Watching {self._watching_detail()}",
                 session_id=None,
                 source_file=None,
                 cwd=None,
@@ -390,7 +392,7 @@ class CodexSessionWatcher:
             return StatusSnapshot(
                 state="idle",
                 label="No recent Codex session",
-                detail=f"Watching {self.sessions_dir}",
+                detail=f"Watching {self._watching_detail()}",
                 session_id=None,
                 source_file=None,
                 cwd=None,
@@ -419,23 +421,30 @@ class CodexSessionWatcher:
         return (priority, age if age is not None else 10**9)
 
     def _recent_session_files(self) -> list[Path]:
-        if not self.sessions_dir.exists():
-            return []
         files: list[Path] = []
-        try:
-            iterator = self.sessions_dir.rglob("*.jsonl")
-            for path in iterator:
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                age = time.time() - stat.st_mtime
-                if age <= 48 * 3600:
-                    files.append(path)
-        except OSError:
-            return []
+        for codex_home in self.codex_homes:
+            sessions_dir = codex_home / "sessions"
+            if not sessions_dir.exists():
+                continue
+            try:
+                iterator = sessions_dir.rglob("*.jsonl")
+                for path in iterator:
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    age = time.time() - stat.st_mtime
+                    if age <= 48 * 3600:
+                        files.append(path)
+            except OSError:
+                continue
         files.sort(key=lambda item: item.stat().st_mtime, reverse=True)
         return files[:MAX_FILES]
+
+    def _watching_detail(self) -> str:
+        if len(self.codex_homes) == 1:
+            return str(self.codex_homes[0] / "sessions")
+        return f"{len(self.codex_homes)} Codex homes"
 
     def _snapshot_for_file(self, path: Path) -> StatusSnapshot | None:
         rows = load_jsonl(path)
@@ -576,7 +585,18 @@ class CodexSessionWatcher:
         return None
 
     def _internal_log_snapshot(self, base: StatusSnapshot | None) -> StatusSnapshot | None:
-        db_path = self.codex_home / "logs_2.sqlite"
+        for codex_home in self.codex_homes:
+            snapshot = self._internal_log_snapshot_for_home(codex_home, base)
+            if snapshot:
+                return snapshot
+        return None
+
+    def _internal_log_snapshot_for_home(
+        self,
+        codex_home: Path,
+        base: StatusSnapshot | None,
+    ) -> StatusSnapshot | None:
+        db_path = codex_home / "logs_2.sqlite"
         if not db_path.exists():
             return None
         cutoff = int(time.time()) - DEFAULT_DESKTOP_EVENT_SECONDS
@@ -1479,7 +1499,13 @@ def default_state_dir() -> Path:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Always-on-top Codex status bar.")
-    parser.add_argument("--codex-home", type=Path, default=default_codex_home())
+    parser.add_argument(
+        "--codex-home",
+        type=Path,
+        action="append",
+        default=None,
+        help="Codex data directory. Repeat to watch Windows and WSL Codex homes together.",
+    )
     parser.add_argument("--state-dir", type=Path, default=default_state_dir())
     parser.add_argument("--stale-seconds", type=int, default=DEFAULT_STALE_SECONDS)
     parser.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
@@ -1493,8 +1519,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    codex_homes = args.codex_home or [default_codex_home()]
     watcher = CodexSessionWatcher(
-        codex_home=args.codex_home.expanduser(),
+        codex_home=[home.expanduser() for home in codex_homes],
         state_dir=args.state_dir.expanduser(),
         stale_seconds=args.stale_seconds,
     )
