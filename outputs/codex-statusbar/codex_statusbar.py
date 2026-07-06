@@ -1490,6 +1490,67 @@ def default_codex_home() -> Path:
     return Path.home() / ".codex"
 
 
+def default_codex_homes() -> list[Path]:
+    homes = [default_codex_home()]
+    homes.extend(discover_wsl_codex_homes())
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for home in homes:
+        key = str(home).lower()
+        if key not in seen:
+            unique.append(home)
+            seen.add(key)
+    return unique
+
+
+def discover_wsl_codex_homes() -> list[Path]:
+    roots = [Path(r"\\wsl.localhost"), Path(r"\\wsl$")]
+    homes: list[Path] = []
+    for root in roots:
+        try:
+            distros = [path for path in root.iterdir() if path.is_dir()]
+        except OSError:
+            distros = [root / name for name in _wsl_distro_names()]
+        for distro in distros:
+            if distro.name.lower() == "docker-desktop":
+                continue
+            user_home_root = distro / "home"
+            try:
+                users = [path for path in user_home_root.iterdir() if path.is_dir()]
+            except OSError:
+                continue
+            for user_home in users:
+                codex_home = user_home / ".codex"
+                if (codex_home / "sessions").exists():
+                    homes.append(codex_home)
+        if homes:
+            break
+    return homes
+
+
+def _wsl_distro_names() -> list[str]:
+    try:
+        raw = subprocess.check_output(
+            ["wsl.exe", "-l", "-q"],
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    names: list[str] = []
+    for encoding in ["utf-16le", "utf-8"]:
+        try:
+            text = raw.decode(encoding, errors="ignore")
+        except UnicodeDecodeError:
+            continue
+        text = text.replace("\x00", "")
+        parsed = [line.strip() for line in text.splitlines() if line.strip()]
+        if parsed:
+            names = parsed
+            break
+    return [name for name in names if name.lower() != "docker-desktop"]
+
+
 def default_state_dir() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -1519,7 +1580,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    codex_homes = args.codex_home or [default_codex_home()]
+    codex_homes = args.codex_home or default_codex_homes()
     watcher = CodexSessionWatcher(
         codex_home=[home.expanduser() for home in codex_homes],
         state_dir=args.state_dir.expanduser(),

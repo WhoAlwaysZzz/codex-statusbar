@@ -39,7 +39,7 @@ codex-stat [参数]
 
 | 参数 | 默认值 | 作用 |
 | --- | --- | --- |
-| `--codex-home <路径>` | `%USERPROFILE%\.codex` | 指定 Codex 数据目录 |
+| `--codex-home <路径>` | 自动发现 Windows + WSL | 指定 Codex 数据目录；可重复使用 |
 | `--state-dir <路径>` | `%LOCALAPPDATA%\CodexStatusbar` | 指定状态和日志目录 |
 | `--stale-seconds <秒>` | `300` | 多久没有事件后显示疑似卡住 |
 | `--poll-seconds <秒>` | `2` | 状态栏刷新间隔 |
@@ -54,7 +54,7 @@ codex-stat --stale-seconds 600
 
 ## WSL Codex CLI
 
-statusbar 是 Windows 窗口，但可以读取 WSL 里的 Codex CLI session。
+statusbar 是 Windows 窗口，但可以读取 WSL 里的 Codex CLI session。默认启动 `codex-stat` 时会自动扫描 Windows `.codex` 和能发现的 WSL `.codex`。
 
 你的默认 WSL 是 `Ubuntu`，WSL 用户是 `zzz07`，所以 WSL Codex home 是：
 
@@ -62,13 +62,13 @@ statusbar 是 Windows 窗口，但可以读取 WSL 里的 Codex CLI session。
 \\wsl.localhost\Ubuntu\home\zzz07\.codex
 ```
 
-只看 WSL Codex CLI：
+只看 WSL Codex CLI，或者自动发现失败时手动指定：
 
 ```powershell
 Start-Process codex-stat -ArgumentList '--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'
 ```
 
-同时看 Windows Codex 和 WSL Codex CLI：
+手动同时指定 Windows Codex 和 WSL Codex CLI：
 
 ```powershell
 Start-Process codex-stat -ArgumentList '--codex-home',"$env:USERPROFILE\.codex",'--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'

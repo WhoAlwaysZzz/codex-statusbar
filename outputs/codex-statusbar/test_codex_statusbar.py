@@ -6,9 +6,16 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from codex_statusbar import CodexSessionWatcher, StatusSnapshot
+from codex_statusbar import (
+    CodexSessionWatcher,
+    StatusSnapshot,
+    _wsl_distro_names,
+    discover_wsl_codex_homes,
+    parse_args,
+)
 
 
 class MultiSessionBoardTests(unittest.TestCase):
@@ -48,6 +55,24 @@ class MultiSessionBoardTests(unittest.TestCase):
 
             session_ids = {snapshot.session_id for snapshot in board.snapshots}
             self.assertEqual(session_ids, {"session-a", "session-b"})
+
+    def test_explicit_codex_home_arguments_are_preserved(self) -> None:
+        args = parse_args(["--codex-home", "C:/a/.codex", "--codex-home", "C:/b/.codex"])
+
+        self.assertEqual([str(path).replace("\\", "/") for path in args.codex_home], ["C:/a/.codex", "C:/b/.codex"])
+
+    def test_wsl_discovery_is_best_effort(self) -> None:
+        homes = discover_wsl_codex_homes()
+
+        self.assertIsInstance(homes, list)
+
+    def test_wsl_distro_names_decodes_utf16_output(self) -> None:
+        raw = "Ubuntu\nUbuntu-22.04\n".encode("utf-16le")
+
+        with patch("codex_statusbar.subprocess.check_output", return_value=raw):
+            names = _wsl_distro_names()
+
+        self.assertEqual(names, ["Ubuntu", "Ubuntu-22.04"])
 
     def test_old_completed_hides_unless_it_is_the_last_task(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
