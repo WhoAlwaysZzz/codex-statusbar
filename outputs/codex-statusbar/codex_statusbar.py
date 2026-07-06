@@ -233,10 +233,12 @@ class CodexSessionWatcher:
             )
         ]
         visible = active + recent_completed
-        if not visible and all_items:
-            visible = [min(all_items, key=self._sort_key)]
         if not visible:
-            visible = all_items
+            completed_items = [item for item in all_items if item.state == "completed"]
+            if completed_items:
+                visible = [min(completed_items, key=self._sort_key)]
+        if not visible:
+            return []
         visible.sort(key=self._sort_key)
         return visible[:MAX_VISIBLE_SESSIONS]
 
@@ -311,6 +313,7 @@ class CodexSessionWatcher:
         last_payload_type: str | None = None
         last_ts: datetime | None = None
         saw_task_complete = False
+        saw_turn_aborted = False
         saw_error = False
         error_info: str | None = None
         last_agent_message = ""
@@ -346,6 +349,12 @@ class CodexSessionWatcher:
                     message = payload.get("last_agent_message")
                     if isinstance(message, str):
                         last_agent_message = message
+                elif payload_type == "turn_aborted":
+                    saw_turn_aborted = True
+                    saw_task_complete = True
+                    reason = payload.get("reason")
+                    if isinstance(reason, str) and reason:
+                        last_agent_message = f"Interrupted: {reason}"
                 elif payload_type == "error":
                     saw_error = True
                     info = payload.get("codex_error_info") or payload.get("message")
@@ -393,6 +402,7 @@ class CodexSessionWatcher:
         state, label, detail, needs_human, action = self._classify(
             age=age,
             saw_task_complete=saw_task_complete,
+            saw_turn_aborted=saw_turn_aborted,
             saw_error=saw_error,
             error_info=error_info,
             saw_reasoning=saw_reasoning,
@@ -700,6 +710,7 @@ class CodexSessionWatcher:
         *,
         age: float | None,
         saw_task_complete: bool,
+        saw_turn_aborted: bool,
         saw_error: bool,
         error_info: str | None,
         saw_reasoning: bool,
@@ -758,6 +769,15 @@ class CodexSessionWatcher:
             )
 
         if saw_task_complete:
+            if saw_turn_aborted:
+                preview = last_agent_message.strip().replace("\n", " ")
+                return (
+                    "completed",
+                    "Interrupted",
+                    preview[:120] if preview else f"Last event {age_text}",
+                    False,
+                    None,
+                )
             preview = last_agent_message.strip().replace("\n", " ")
             detail = preview[:120] if preview else f"Last event {age_text}"
             return ("completed", "Completed", detail, False, None)

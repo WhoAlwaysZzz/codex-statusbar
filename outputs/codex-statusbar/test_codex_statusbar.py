@@ -77,7 +77,28 @@ class MultiSessionBoardTests(unittest.TestCase):
             (session_dir / "rollout-active.jsonl").unlink()
             board = watcher.scan_all()
 
-            self.assertEqual([snapshot.session_id for snapshot in board.snapshots], ["old-stale"])
+            self.assertEqual(board.snapshots, [])
+            self.assertEqual(board.primary.state, "idle")
+
+    def test_turn_aborted_is_not_reported_as_stale_error(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "06"
+            session_dir.mkdir(parents=True)
+            self._write_session(
+                session_dir / "rollout-aborted.jsonl",
+                "aborted",
+                "aborted",
+                seconds_ago=7200,
+            )
+
+            watcher = CodexSessionWatcher(codex_home, root / "state")
+            board = watcher.scan_all()
+
+            self.assertEqual(len(board.snapshots), 1)
+            self.assertEqual(board.primary.state, "completed")
+            self.assertEqual(board.primary.label, "Interrupted")
 
     def _write_session(
         self,
@@ -112,6 +133,14 @@ class MultiSessionBoardTests(unittest.TestCase):
                     "timestamp": timestamp,
                     "type": "event_msg",
                     "payload": {"type": "task_complete", "last_agent_message": "done"},
+                }
+            )
+        elif state == "aborted":
+            rows.append(
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "turn_aborted", "reason": "interrupted"},
                 }
             )
         path.write_text(
