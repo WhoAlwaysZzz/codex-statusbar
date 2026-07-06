@@ -18,11 +18,19 @@ import sys
 import threading
 import time
 import tkinter as tk
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox
 from typing import Any
+
+try:
+    import win32con
+    import win32gui
+except ImportError:  # pragma: no cover - non-Windows fallback
+    win32con = None
+    win32gui = None
 
 
 APP_NAME = "Codex Statusbar"
@@ -34,6 +42,7 @@ DEFAULT_INACTIVE_KEEP_SECONDS = 3600
 MAX_FILES = 60
 MAX_FILE_BYTES = 1_500_000
 MAX_VISIBLE_SESSIONS = 8
+MAX_DISPLAY_CHARS = 20
 
 
 PALETTE = {
@@ -71,6 +80,130 @@ class StatusBoard:
     primary: StatusSnapshot
     snapshots: list[StatusSnapshot]
     updated_at: str
+
+
+class WindowsTrayIcon:
+    def __init__(self, app: "StatusBarApp") -> None:
+        self.app = app
+        self.available = win32gui is not None and win32con is not None
+        self.hwnd: int | None = None
+        self.message_id = win32con.WM_USER + 20 if win32con else 0
+        self.class_name = f"CodexStatusbarTray-{uuid.uuid4()}"
+        self.icon_handle: int | None = None
+
+    def install(self) -> None:
+        if not self.available:
+            return
+        assert win32gui is not None and win32con is not None
+        message_map = {
+            self.message_id: self._on_notify,
+            win32con.WM_DESTROY: self._on_destroy,
+            win32con.WM_COMMAND: self._on_command,
+        }
+        wnd_class = win32gui.WNDCLASS()
+        wnd_class.hInstance = win32gui.GetModuleHandle(None)
+        wnd_class.lpszClassName = self.class_name
+        wnd_class.lpfnWndProc = message_map
+        try:
+            win32gui.RegisterClass(wnd_class)
+        except win32gui.error:
+            pass
+        self.hwnd = win32gui.CreateWindow(
+            self.class_name,
+            APP_NAME,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            wnd_class.hInstance,
+            None,
+        )
+        self.icon_handle = win32gui.LoadIcon(0, win32con.IDI_APPLICATION)
+        self.show()
+
+    def show(self) -> None:
+        if not self.available or not self.hwnd:
+            return
+        assert win32gui is not None
+        flags = win32gui.NIF_ICON | win32gui.NIF_MESSAGE | win32gui.NIF_TIP
+        nid = (
+            self.hwnd,
+            0,
+            flags,
+            self.message_id,
+            self.icon_handle,
+            APP_NAME,
+        )
+        try:
+            win32gui.Shell_NotifyIcon(win32gui.NIM_ADD, nid)
+        except win32gui.error:
+            win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
+
+    def remove(self) -> None:
+        if not self.available or not self.hwnd:
+            return
+        assert win32gui is not None
+        try:
+            win32gui.Shell_NotifyIcon(win32gui.NIM_DELETE, (self.hwnd, 0))
+        except win32gui.error:
+            pass
+
+    def pump(self) -> None:
+        if not self.available:
+            return
+        assert win32gui is not None
+        win32gui.PumpWaitingMessages()
+
+    def _on_notify(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        if win32con is None:
+            return 0
+        if lparam in {
+            win32con.WM_LBUTTONUP,
+            win32con.WM_LBUTTONDBLCLK,
+        }:
+            self.app.show_from_tray()
+        elif lparam == win32con.WM_RBUTTONUP:
+            self._show_menu()
+        return 0
+
+    def _show_menu(self) -> None:
+        if win32gui is None or win32con is None or not self.hwnd:
+            return
+        menu = win32gui.CreatePopupMenu()
+        win32gui.AppendMenu(menu, win32con.MF_STRING, 1001, "Show")
+        win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, "Mini")
+        win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
+        win32gui.AppendMenu(menu, win32con.MF_STRING, 1003, "Exit")
+        pos = win32gui.GetCursorPos()
+        win32gui.SetForegroundWindow(self.hwnd)
+        win32gui.TrackPopupMenu(
+            menu,
+            win32con.TPM_LEFTALIGN,
+            pos[0],
+            pos[1],
+            0,
+            self.hwnd,
+            None,
+        )
+        win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
+
+    def _on_command(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        command_id = wparam & 0xFFFF
+        if command_id == 1001:
+            self.app.show_from_tray()
+        elif command_id == 1002:
+            self.app.show_from_tray()
+            self.app.set_mini_mode(True)
+        elif command_id == 1003:
+            self.app.close()
+        return 0
+
+    def _on_destroy(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+        self.remove()
+        return 0
 
 
 def now_iso() -> str:
@@ -977,6 +1110,9 @@ class StatusBarApp:
         self.root.overrideredirect(True)
         self.root.configure(bg="#0f172a")
         self._drag_start: tuple[int, int] | None = None
+        self._last_render_signature: tuple[Any, ...] | None = None
+        self.mini_mode = False
+        self.last_board: StatusBoard | None = None
 
         self.shell = tk.Frame(self.root, bg="#0f172a", padx=8, pady=8)
         self.shell.pack(fill="both", expand=True)
@@ -1007,7 +1143,7 @@ class StatusBarApp:
         self.summary.grid(row=1, column=0, sticky="ew", pady=(1, 5))
 
         self.task_frame = tk.Frame(self.card, bg="#f8fafc")
-        self.task_frame.grid(row=2, column=0, columnspan=4, sticky="ew")
+        self.task_frame.grid(row=2, column=0, columnspan=6, sticky="ew")
         self.task_rows: list[tk.Widget] = []
 
         self.refresh_btn = tk.Button(
@@ -1036,10 +1172,36 @@ class StatusBarApp:
         )
         self.log_btn.grid(row=0, column=2, rowspan=2, padx=(0, 4), sticky="e")
 
+        self.mini_btn = tk.Button(
+            self.card,
+            text="Mini",
+            command=self.toggle_mini_mode,
+            relief="flat",
+            bg="#e2e8f0",
+            fg="#0f172a",
+            activebackground="#cbd5e1",
+            font=("Segoe UI", 8),
+            padx=8,
+        )
+        self.mini_btn.grid(row=0, column=3, rowspan=2, padx=(0, 4), sticky="e")
+
+        self.tray_btn = tk.Button(
+            self.card,
+            text="_",
+            command=self.minimize_to_tray,
+            relief="flat",
+            bg="#f1f5f9",
+            fg="#475569",
+            activebackground="#dbeafe",
+            font=("Segoe UI", 9, "bold"),
+            width=3,
+        )
+        self.tray_btn.grid(row=0, column=4, rowspan=2, padx=(0, 4), sticky="e")
+
         self.close_btn = tk.Button(
             self.card,
             text="x",
-            command=self.root.destroy,
+            command=self.close,
             relief="flat",
             bg="#f1f5f9",
             fg="#475569",
@@ -1047,7 +1209,7 @@ class StatusBarApp:
             font=("Segoe UI", 9, "bold"),
             width=3,
         )
-        self.close_btn.grid(row=0, column=3, rowspan=2, sticky="ne")
+        self.close_btn.grid(row=0, column=5, rowspan=2, sticky="ne")
 
         self.card.grid_columnconfigure(0, weight=1, minsize=380)
         self.task_frame.grid_columnconfigure(0, weight=1)
@@ -1055,6 +1217,9 @@ class StatusBarApp:
             widget.bind("<ButtonPress-1>", self.start_drag)
             widget.bind("<B1-Motion>", self.on_drag)
 
+        self.tray = WindowsTrayIcon(self)
+        self.tray.install()
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
 
@@ -1068,6 +1233,7 @@ class StatusBarApp:
         self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
 
     def tick(self) -> None:
+        self.tray.pump()
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
 
@@ -1099,6 +1265,12 @@ class StatusBarApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def render_board(self, board: StatusBoard) -> None:
+        signature = self._render_signature(board)
+        if signature == self._last_render_signature:
+            return
+        self._last_render_signature = signature
+        self.last_board = board
+
         color, bg = PALETTE.get(board.primary.state, PALETTE["idle"])
         self.shell.configure(bg=color)
         self.card.configure(bg=bg)
@@ -1106,10 +1278,15 @@ class StatusBarApp:
         for label in [self.header, self.summary]:
             label.configure(bg=bg)
 
+        if self.mini_mode:
+            self._render_mini(board, bg)
+            return
+
+        self._show_full_widgets()
         count = len(board.snapshots)
         attention = sum(1 for item in board.snapshots if item.needs_human)
         self.header_var.set(f"Codex sessions ({count})")
-        summary = board.primary.label
+        summary = self._clip_text(board.primary.label)
         if attention:
             summary = f"{attention} need attention | {summary}"
         self.summary_var.set(summary)
@@ -1120,6 +1297,43 @@ class StatusBarApp:
 
         if board.primary.needs_human:
             self.root.bell()
+
+    def _render_signature(self, board: StatusBoard) -> tuple[Any, ...]:
+        rows = tuple(
+            (
+                item.state,
+                item.label,
+                self._task_name(item),
+                self._clip_text(item.detail or item.last_event_type or ""),
+                item.needs_human,
+            )
+            for item in board.snapshots
+        )
+        return (self.mini_mode, board.primary.state, board.primary.label, rows)
+
+    def _render_mini(self, board: StatusBoard, bg: str) -> None:
+        self._clear_task_rows()
+        self.task_frame.grid_remove()
+        self.summary.grid_remove()
+        self.refresh_btn.grid_remove()
+        self.log_btn.grid_remove()
+        self.header.grid()
+        count = len(board.snapshots)
+        self.card.grid_columnconfigure(0, minsize=72)
+        self.header_var.set(f"Codex ({count})")
+        self.root.minsize(230, 42)
+        self.root.geometry("230x42")
+
+    def _show_full_widgets(self) -> None:
+        self.header.grid()
+        self.summary.grid()
+        self.task_frame.grid()
+        self.refresh_btn.grid()
+        self.log_btn.grid()
+        self.card.grid_columnconfigure(0, minsize=380)
+        self.root.minsize(600, 92)
+        if self.root.winfo_width() < 500:
+            self.root.geometry("600x120")
 
     def _clear_task_rows(self) -> None:
         for row in self.task_rows:
@@ -1173,12 +1387,11 @@ class StatusBarApp:
 
     def _task_title(self, snapshot: StatusSnapshot) -> str:
         prefix = "!" if snapshot.needs_human else ""
-        session = self._short_session(snapshot.session_id)
-        return f"{prefix}{snapshot.label} | {session}"
+        return f"{prefix}{self._clip_text(snapshot.label)} | {self._task_name(snapshot)}"
 
     def _task_detail(self, snapshot: StatusSnapshot) -> str:
         detail = (snapshot.detail or snapshot.last_event_type or "").replace("\n", " ")
-        return detail[:150]
+        return self._clip_text(detail)
 
     def _task_meta(self, snapshot: StatusSnapshot) -> str:
         age = snapshot.last_event_age_seconds
@@ -1189,6 +1402,52 @@ class StatusBarApp:
         if not session_id:
             return "-"
         return session_id[-12:]
+
+    def _task_name(self, snapshot: StatusSnapshot) -> str:
+        project = self._project_name(snapshot)
+        session = self._short_session(snapshot.session_id)
+        return f"{project}/{session}"
+
+    def _project_name(self, snapshot: StatusSnapshot) -> str:
+        if snapshot.cwd:
+            name = Path(snapshot.cwd).name
+            if name:
+                return self._clip_text(name)
+        if snapshot.source_file:
+            parent = Path(snapshot.source_file).parent.name
+            if parent:
+                return self._clip_text(parent)
+        return "Codex"
+
+    def _clip_text(self, text: str, limit: int = MAX_DISPLAY_CHARS) -> str:
+        clean = " ".join(str(text).split())
+        if len(clean) <= limit:
+            return clean
+        return clean[:limit] + "..."
+
+    def toggle_mini_mode(self) -> None:
+        self.set_mini_mode(not self.mini_mode)
+
+    def set_mini_mode(self, enabled: bool) -> None:
+        if self.mini_mode == enabled:
+            return
+        self.mini_mode = enabled
+        self.mini_btn.configure(text="Full" if enabled else "Mini")
+        self._last_render_signature = None
+        if self.last_board:
+            self.render_board(self.last_board)
+
+    def minimize_to_tray(self) -> None:
+        self.root.withdraw()
+
+    def show_from_tray(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+
+    def close(self) -> None:
+        self.tray.remove()
+        self.root.destroy()
 
     def open_logs(self) -> None:
         path = self.watcher.state_dir
