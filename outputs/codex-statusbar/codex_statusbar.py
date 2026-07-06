@@ -34,6 +34,8 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 
 APP_NAME = "Codex Statusbar"
+FULL_WINDOW_GEOMETRY = "760x132"
+MINI_WINDOW_GEOMETRY = "230x42"
 DEFAULT_STALE_SECONDS = 300
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_DESKTOP_EVENT_SECONDS = 180
@@ -1105,7 +1107,7 @@ class StatusBarApp:
         self.root = tk.Tk()
         self.root.title(APP_NAME)
         self.root.geometry("+30+30")
-        self.root.minsize(600, 92)
+        self.root.minsize(720, 92)
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.configure(bg="#0f172a")
@@ -1212,6 +1214,8 @@ class StatusBarApp:
         self.close_btn.grid(row=0, column=5, rowspan=2, sticky="ne")
 
         self.card.grid_columnconfigure(0, weight=1, minsize=380)
+        for column in range(1, 6):
+            self.card.grid_columnconfigure(column, weight=0)
         self.task_frame.grid_columnconfigure(0, weight=1)
         for widget in [self.shell, self.card, self.header, self.summary, self.task_frame]:
             widget.bind("<ButtonPress-1>", self.start_drag)
@@ -1322,7 +1326,7 @@ class StatusBarApp:
         self.card.grid_columnconfigure(0, minsize=72)
         self.header_var.set(f"Codex ({count})")
         self.root.minsize(230, 42)
-        self.root.geometry("230x42")
+        self.root.geometry(MINI_WINDOW_GEOMETRY)
 
     def _show_full_widgets(self) -> None:
         self.header.grid()
@@ -1331,9 +1335,9 @@ class StatusBarApp:
         self.refresh_btn.grid()
         self.log_btn.grid()
         self.card.grid_columnconfigure(0, minsize=380)
-        self.root.minsize(600, 92)
-        if self.root.winfo_width() < 500:
-            self.root.geometry("600x120")
+        self.root.minsize(720, 92)
+        self.root.update_idletasks()
+        self.root.geometry(FULL_WINDOW_GEOMETRY)
 
     def _clear_task_rows(self) -> None:
         for row in self.task_rows:
