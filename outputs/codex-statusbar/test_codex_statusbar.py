@@ -1,12 +1,123 @@
+import json
 import sqlite3
 import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from codex_statusbar import CodexSessionWatcher, StatusSnapshot
+
+
+class MultiSessionBoardTests(unittest.TestCase):
+    def test_scan_all_keeps_multiple_active_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "06"
+            session_dir.mkdir(parents=True)
+            self._write_session(session_dir / "rollout-session-a.jsonl", "session-a", "working")
+            self._write_session(session_dir / "rollout-session-b.jsonl", "session-b", "executing")
+
+            watcher = CodexSessionWatcher(codex_home, root / "state")
+            board = watcher.scan_all()
+
+            session_ids = {snapshot.session_id for snapshot in board.snapshots}
+            self.assertIn("session-a", session_ids)
+            self.assertIn("session-b", session_ids)
+            self.assertEqual(len(board.snapshots), 2)
+            status_all = json.loads((root / "state" / "status_all.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(status_all["snapshots"]), 2)
+
+    def test_old_completed_hides_unless_it_is_the_last_task(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "06"
+            session_dir.mkdir(parents=True)
+            self._write_session(
+                session_dir / "rollout-old-done.jsonl",
+                "old-done",
+                "completed",
+                seconds_ago=600,
+            )
+            self._write_session(session_dir / "rollout-active.jsonl", "active", "working")
+
+            watcher = CodexSessionWatcher(codex_home, root / "state")
+            board = watcher.scan_all()
+
+            self.assertEqual([snapshot.session_id for snapshot in board.snapshots], ["active"])
+
+            (session_dir / "rollout-active.jsonl").unlink()
+            board = watcher.scan_all()
+
+            self.assertEqual([snapshot.session_id for snapshot in board.snapshots], ["old-done"])
+
+    def test_old_stale_hides_unless_it_is_the_last_task(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "06"
+            session_dir.mkdir(parents=True)
+            self._write_session(
+                session_dir / "rollout-old-stale.jsonl",
+                "old-stale",
+                "working",
+                seconds_ago=7200,
+            )
+            self._write_session(session_dir / "rollout-active.jsonl", "active", "working")
+
+            watcher = CodexSessionWatcher(codex_home, root / "state")
+            board = watcher.scan_all()
+
+            self.assertEqual([snapshot.session_id for snapshot in board.snapshots], ["active"])
+
+            (session_dir / "rollout-active.jsonl").unlink()
+            board = watcher.scan_all()
+
+            self.assertEqual([snapshot.session_id for snapshot in board.snapshots], ["old-stale"])
+
+    def _write_session(
+        self,
+        path: Path,
+        session_id: str,
+        state: str,
+        *,
+        seconds_ago: int = 1,
+    ) -> None:
+        timestamp = (
+            datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
+        ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        rows = [
+            {"timestamp": timestamp, "type": "session_meta", "payload": {"cwd": str(path.parent)}},
+            {
+                "timestamp": timestamp,
+                "type": "event_msg",
+                "payload": {"type": "task_started"},
+            },
+        ]
+        if state == "executing":
+            rows.append(
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {"type": "function_call", "name": "shell_command"},
+                }
+            )
+        elif state == "completed":
+            rows.append(
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete", "last_agent_message": "done"},
+                }
+            )
+        path.write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+            encoding="utf-8",
+        )
 
 
 class DesktopInternalLogTests(unittest.TestCase):

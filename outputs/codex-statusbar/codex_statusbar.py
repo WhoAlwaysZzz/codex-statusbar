@@ -29,8 +29,11 @@ APP_NAME = "Codex Statusbar"
 DEFAULT_STALE_SECONDS = 300
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_DESKTOP_EVENT_SECONDS = 180
+DEFAULT_COMPLETED_KEEP_SECONDS = 180
+DEFAULT_INACTIVE_KEEP_SECONDS = 3600
 MAX_FILES = 60
 MAX_FILE_BYTES = 1_500_000
+MAX_VISIBLE_SESSIONS = 8
 
 
 PALETTE = {
@@ -61,6 +64,13 @@ class StatusSnapshot:
     needs_human: bool = False
     recommended_action: str | None = None
     error_info: str | None = None
+
+
+@dataclass
+class StatusBoard:
+    primary: StatusSnapshot
+    snapshots: list[StatusSnapshot]
+    updated_at: str
 
 
 def now_iso() -> str:
@@ -131,6 +141,7 @@ class CodexSessionWatcher:
         self.sessions_dir = codex_home / "sessions"
         self.state_dir = state_dir
         self.status_path = state_dir / "status.json"
+        self.status_all_path = state_dir / "status_all.json"
         self.appserver_status_path = state_dir / "appserver_status.json"
         self.guard_status_path = state_dir / "guard_status.json"
         self.watchdog_status_path = state_dir / "watchdog_status.json"
@@ -142,14 +153,13 @@ class CodexSessionWatcher:
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
     def scan(self) -> StatusSnapshot:
-        external_snapshot = self._external_snapshot()
-        if external_snapshot:
-            self._write_status(external_snapshot)
-            self._append_event_if_changed(external_snapshot)
-            self._append_action_if_needed(external_snapshot)
-            return external_snapshot
+        return self.scan_all().primary
 
+    def scan_all(self) -> StatusBoard:
+        external_candidates = self._external_snapshots()
         files = self._recent_session_files()
+        if external_candidates and not files:
+            return self._finalize_board(external_candidates)
         if not files:
             snapshot = self._desktop_snapshot(None) or StatusSnapshot(
                 state="idle",
@@ -163,15 +173,16 @@ class CodexSessionWatcher:
                 updated_at=now_iso(),
                 recommended_action="Start a Codex task, then this bar will follow it.",
             )
-            self._write_status(snapshot)
-            self._append_event_if_changed(snapshot)
-            self._append_action_if_needed(snapshot)
-            return snapshot
+            return self._finalize_board([snapshot])
 
         candidates: list[StatusSnapshot] = []
+        candidates.extend(external_candidates)
         for path in files:
             snapshot = self._snapshot_for_file(path)
             if snapshot:
+                desktop_snapshot = self._desktop_snapshot(snapshot)
+                if desktop_snapshot:
+                    snapshot = desktop_snapshot
                 candidates.append(snapshot)
 
         if not candidates:
@@ -188,25 +199,87 @@ class CodexSessionWatcher:
                 needs_human=True,
                 recommended_action="Check whether session files are still being written.",
             )
-            self._write_status(snapshot)
-            self._append_event_if_changed(snapshot)
-            self._append_action_if_needed(snapshot)
-            return snapshot
+            return self._finalize_board([snapshot])
 
-        snapshot = max(
-            candidates,
-            key=lambda item: (
-                item.last_event_age_seconds is not None,
-                -(item.last_event_age_seconds or 10**9),
-            ),
-        )
-        desktop_snapshot = self._desktop_snapshot(snapshot)
-        if desktop_snapshot:
-            snapshot = desktop_snapshot
-        self._write_status(snapshot)
-        self._append_event_if_changed(snapshot)
-        self._append_action_if_needed(snapshot)
-        return snapshot
+        return self._finalize_board(candidates)
+
+    def _finalize_board(self, snapshots: list[StatusSnapshot]) -> StatusBoard:
+        visible = self._visible_snapshots(snapshots)
+        primary = self._primary_snapshot(visible)
+        board = StatusBoard(primary=primary, snapshots=visible, updated_at=now_iso())
+        self._write_status_board(board)
+        self._append_event_if_changed(primary)
+        for snapshot in visible:
+            self._append_action_if_needed(snapshot)
+        return board
+
+    def _visible_snapshots(self, snapshots: list[StatusSnapshot]) -> list[StatusSnapshot]:
+        unique: dict[str, StatusSnapshot] = {}
+        for snapshot in snapshots:
+            key = snapshot.session_id or snapshot.source_file or snapshot.label
+            existing = unique.get(key)
+            if existing is None or self._sort_key(snapshot) < self._sort_key(existing):
+                unique[key] = snapshot
+
+        all_items = list(unique.values())
+        active = [item for item in all_items if self._should_show_active(item)]
+        recent_completed = [
+            item
+            for item in all_items
+            if item.state == "completed"
+            and (
+                item.last_event_age_seconds is None
+                or item.last_event_age_seconds <= DEFAULT_COMPLETED_KEEP_SECONDS
+            )
+        ]
+        visible = active + recent_completed
+        if not visible and all_items:
+            visible = [min(all_items, key=self._sort_key)]
+        if not visible:
+            visible = all_items
+        visible.sort(key=self._sort_key)
+        return visible[:MAX_VISIBLE_SESSIONS]
+
+    def _should_show_active(self, snapshot: StatusSnapshot) -> bool:
+        if snapshot.state in {"completed", "idle"}:
+            return False
+        if snapshot.needs_human:
+            return True
+        age = snapshot.last_event_age_seconds
+        return age is None or age <= DEFAULT_INACTIVE_KEEP_SECONDS
+
+    def _primary_snapshot(self, snapshots: list[StatusSnapshot]) -> StatusSnapshot:
+        if not snapshots:
+            return StatusSnapshot(
+                state="idle",
+                label="No recent Codex session",
+                detail=f"Watching {self.sessions_dir}",
+                session_id=None,
+                source_file=None,
+                cwd=None,
+                last_event_type=None,
+                last_event_age_seconds=None,
+                updated_at=now_iso(),
+            )
+        return min(snapshots, key=self._sort_key)
+
+    def _sort_key(self, snapshot: StatusSnapshot) -> tuple[int, float]:
+        priority = {
+            "waiting": 0,
+            "failed": 1,
+            "reconnecting": 2,
+            "recovering": 3,
+            "stale": 4,
+            "executing": 5,
+            "outputting": 6,
+            "working": 7,
+            "completed": 8,
+            "idle": 9,
+        }.get(snapshot.state, 7)
+        if snapshot.needs_human:
+            priority = -1
+        age = snapshot.last_event_age_seconds
+        return (priority, age if age is not None else 10**9)
 
     def _recent_session_files(self) -> list[Path]:
         if not self.sessions_dir.exists():
@@ -732,6 +805,15 @@ class CodexSessionWatcher:
         )
         tmp.replace(self.status_path)
 
+    def _write_status_board(self, board: StatusBoard) -> None:
+        self._write_status(board.primary)
+        tmp = self.status_all_path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(asdict(board), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp.replace(self.status_all_path)
+
     def _append_event_if_changed(self, snapshot: StatusSnapshot) -> None:
         key = "|".join(
             [
@@ -787,6 +869,12 @@ class CodexSessionWatcher:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def _external_snapshot(self) -> StatusSnapshot | None:
+        snapshots = self._external_snapshots()
+        if not snapshots:
+            return None
+        return self._primary_snapshot(snapshots)
+
+    def _external_snapshots(self) -> list[StatusSnapshot]:
         snapshots: list[tuple[float, StatusSnapshot]] = []
         for path in [
             self.appserver_status_path,
@@ -807,9 +895,9 @@ class CodexSessionWatcher:
                 mtime = 0.0
             snapshots.append((mtime, snapshot))
         if not snapshots:
-            return None
+            return []
         snapshots.sort(key=lambda item: item[0], reverse=True)
-        return snapshots[0][1]
+        return [snapshot for _, snapshot in snapshots]
 
     def _snapshot_from_status_file(self, path: Path) -> StatusSnapshot | None:
         try:
@@ -864,7 +952,7 @@ class StatusBarApp:
         self.root = tk.Tk()
         self.root.title(APP_NAME)
         self.root.geometry("+30+30")
-        self.root.minsize(440, 68)
+        self.root.minsize(600, 92)
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.configure(bg="#0f172a")
@@ -876,43 +964,31 @@ class StatusBarApp:
         self.card = tk.Frame(self.shell, bg="#f8fafc", padx=10, pady=8)
         self.card.pack(fill="both", expand=True)
 
-        self.dot = tk.Canvas(self.card, width=18, height=18, bg="#f8fafc", highlightthickness=0)
-        self.dot.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 8), pady=(1, 0))
-        self.dot_id = self.dot.create_oval(2, 2, 16, 16, fill="#334155", outline="")
-
-        self.title_var = tk.StringVar(value="Starting Codex watcher")
-        self.detail_var = tk.StringVar(value="Scanning local sessions...")
-        self.meta_var = tk.StringVar(value="")
-
-        self.title = tk.Label(
+        self.header_var = tk.StringVar(value="Starting Codex watcher")
+        self.header = tk.Label(
             self.card,
-            textvariable=self.title_var,
+            textvariable=self.header_var,
             bg="#f8fafc",
             fg="#0f172a",
             font=("Segoe UI", 10, "bold"),
             anchor="w",
         )
-        self.title.grid(row=0, column=1, sticky="ew")
+        self.header.grid(row=0, column=0, sticky="ew")
 
-        self.detail = tk.Label(
+        self.summary_var = tk.StringVar(value="Scanning local sessions...")
+        self.summary = tk.Label(
             self.card,
-            textvariable=self.detail_var,
-            bg="#f8fafc",
-            fg="#334155",
-            font=("Segoe UI", 9),
-            anchor="w",
-        )
-        self.detail.grid(row=1, column=1, sticky="ew", pady=(1, 0))
-
-        self.meta = tk.Label(
-            self.card,
-            textvariable=self.meta_var,
+            textvariable=self.summary_var,
             bg="#f8fafc",
             fg="#64748b",
             font=("Segoe UI", 8),
             anchor="w",
         )
-        self.meta.grid(row=2, column=1, sticky="ew", pady=(3, 0))
+        self.summary.grid(row=1, column=0, sticky="ew", pady=(1, 5))
+
+        self.task_frame = tk.Frame(self.card, bg="#f8fafc")
+        self.task_frame.grid(row=2, column=0, columnspan=4, sticky="ew")
+        self.task_rows: list[tk.Widget] = []
 
         self.refresh_btn = tk.Button(
             self.card,
@@ -925,7 +1001,7 @@ class StatusBarApp:
             font=("Segoe UI", 8),
             padx=8,
         )
-        self.refresh_btn.grid(row=0, column=2, rowspan=2, padx=(10, 4), sticky="e")
+        self.refresh_btn.grid(row=0, column=1, rowspan=2, padx=(10, 4), sticky="e")
 
         self.log_btn = tk.Button(
             self.card,
@@ -938,7 +1014,7 @@ class StatusBarApp:
             font=("Segoe UI", 8),
             padx=8,
         )
-        self.log_btn.grid(row=0, column=3, rowspan=2, padx=(0, 4), sticky="e")
+        self.log_btn.grid(row=0, column=2, rowspan=2, padx=(0, 4), sticky="e")
 
         self.close_btn = tk.Button(
             self.card,
@@ -951,10 +1027,11 @@ class StatusBarApp:
             font=("Segoe UI", 9, "bold"),
             width=3,
         )
-        self.close_btn.grid(row=0, column=4, rowspan=2, sticky="ne")
+        self.close_btn.grid(row=0, column=3, rowspan=2, sticky="ne")
 
-        self.card.grid_columnconfigure(1, weight=1, minsize=250)
-        for widget in [self.shell, self.card, self.title, self.detail, self.meta, self.dot]:
+        self.card.grid_columnconfigure(0, weight=1, minsize=380)
+        self.task_frame.grid_columnconfigure(0, weight=1)
+        for widget in [self.shell, self.card, self.header, self.summary, self.task_frame]:
             widget.bind("<ButtonPress-1>", self.start_drag)
             widget.bind("<B1-Motion>", self.on_drag)
 
@@ -977,7 +1054,7 @@ class StatusBarApp:
     def refresh_now(self) -> None:
         def worker() -> None:
             try:
-                snapshot = self.watcher.scan()
+                board = self.watcher.scan_all()
             except Exception as exc:  # defensive UI boundary
                 snapshot = StatusSnapshot(
                     state="failed",
@@ -992,30 +1069,106 @@ class StatusBarApp:
                     needs_human=True,
                     recommended_action="Open logs or restart the status bar.",
                 )
-            self.root.after(0, lambda: self.render(snapshot))
+                board = StatusBoard(
+                    primary=snapshot,
+                    snapshots=[snapshot],
+                    updated_at=now_iso(),
+                )
+            self.root.after(0, lambda: self.render_board(board))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def render(self, snapshot: StatusSnapshot) -> None:
-        color, bg = PALETTE.get(snapshot.state, PALETTE["idle"])
+    def render_board(self, board: StatusBoard) -> None:
+        color, bg = PALETTE.get(board.primary.state, PALETTE["idle"])
         self.shell.configure(bg=color)
         self.card.configure(bg=bg)
-        self.dot.configure(bg=bg)
-        self.dot.itemconfigure(self.dot_id, fill=color)
-        for label in [self.title, self.detail, self.meta]:
+        self.task_frame.configure(bg=bg)
+        for label in [self.header, self.summary]:
             label.configure(bg=bg)
 
-        prefix = "!" if snapshot.needs_human else ""
-        self.title_var.set(f"{prefix}{snapshot.label}")
-        self.detail_var.set(snapshot.detail or "")
+        count = len(board.snapshots)
+        attention = sum(1 for item in board.snapshots if item.needs_human)
+        self.header_var.set(f"Codex sessions ({count})")
+        summary = board.primary.label
+        if attention:
+            summary = f"{attention} need attention | {summary}"
+        self.summary_var.set(summary)
 
+        self._clear_task_rows()
+        for index, snapshot in enumerate(board.snapshots):
+            self._add_task_row(index, snapshot, bg)
+
+        if board.primary.needs_human:
+            self.root.bell()
+
+    def _clear_task_rows(self) -> None:
+        for row in self.task_rows:
+            row.destroy()
+        self.task_rows = []
+
+    def _add_task_row(self, index: int, snapshot: StatusSnapshot, bg: str) -> None:
+        color, _ = PALETTE.get(snapshot.state, PALETTE["idle"])
+        row = tk.Frame(self.task_frame, bg=bg, pady=2)
+        row.grid(row=index, column=0, sticky="ew")
+        row.grid_columnconfigure(1, weight=1)
+
+        dot = tk.Canvas(row, width=14, height=14, bg=bg, highlightthickness=0)
+        dot.create_oval(2, 2, 12, 12, fill=color, outline="")
+        dot.grid(row=0, column=0, rowspan=2, sticky="nw", padx=(0, 7), pady=(3, 0))
+
+        title = tk.Label(
+            row,
+            text=self._task_title(snapshot),
+            bg=bg,
+            fg="#0f172a",
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        title.grid(row=0, column=1, sticky="ew")
+
+        detail = tk.Label(
+            row,
+            text=self._task_detail(snapshot),
+            bg=bg,
+            fg="#475569",
+            font=("Segoe UI", 8),
+            anchor="w",
+        )
+        detail.grid(row=1, column=1, sticky="ew")
+
+        meta = tk.Label(
+            row,
+            text=self._task_meta(snapshot),
+            bg=bg,
+            fg="#64748b",
+            font=("Segoe UI", 8),
+            anchor="e",
+        )
+        meta.grid(row=0, column=2, rowspan=2, sticky="e", padx=(10, 0))
+
+        for widget in [row, dot, title, detail, meta]:
+            widget.bind("<ButtonPress-1>", self.start_drag)
+            widget.bind("<B1-Motion>", self.on_drag)
+        self.task_rows.append(row)
+
+    def _task_title(self, snapshot: StatusSnapshot) -> str:
+        prefix = "!" if snapshot.needs_human else ""
+        session = self._short_session(snapshot.session_id)
+        return f"{prefix}{snapshot.label} | {session}"
+
+    def _task_detail(self, snapshot: StatusSnapshot) -> str:
+        detail = (snapshot.detail or snapshot.last_event_type or "").replace("\n", " ")
+        return detail[:150]
+
+    def _task_meta(self, snapshot: StatusSnapshot) -> str:
         age = snapshot.last_event_age_seconds
         age_text = "-" if age is None else f"{int(age)}s"
-        session = (snapshot.session_id or "-")[:18]
-        self.meta_var.set(f"{snapshot.state} | age {age_text} | session {session}")
+        return f"{snapshot.state} | {age_text}"
 
-        if snapshot.needs_human:
-            self.root.bell()
+    def _short_session(self, session_id: str | None) -> str:
+        if not session_id:
+            return "-"
+        return session_id[-12:]
 
     def open_logs(self) -> None:
         path = self.watcher.state_dir
