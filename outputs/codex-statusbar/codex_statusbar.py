@@ -136,6 +136,26 @@ def mini_header_text(
     return f"{summary} ({max(0, session_count)})"
 
 
+def clamp_window_position(
+    x: int,
+    y: int,
+    screen_width: int,
+    screen_height: int,
+    *,
+    window_width: int = FULL_WINDOW_WIDTH,
+    window_height: int = FULL_WINDOW_MIN_HEIGHT,
+    margin: int = 16,
+) -> tuple[int, int]:
+    if screen_width <= 0 or screen_height <= 0:
+        return 30, 30
+    max_x = max(margin, screen_width - min(window_width, screen_width) - margin)
+    max_y = max(margin, screen_height - min(window_height, screen_height) - margin)
+    return (
+        min(max(x, margin), max_x),
+        min(max(y, margin), max_y),
+    )
+
+
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -1788,7 +1808,13 @@ class StatusBarApp:
         x = self.ui_settings.get("x")
         y = self.ui_settings.get("y")
         if isinstance(x, int) and isinstance(y, int):
-            return f"+{x}+{y}"
+            safe_x, safe_y = clamp_window_position(
+                x,
+                y,
+                self.root.winfo_screenwidth(),
+                self.root.winfo_screenheight(),
+            )
+            return f"+{safe_x}+{safe_y}"
         return "+30+30"
 
     def _load_ui_settings(self) -> dict[str, Any]:

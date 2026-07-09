@@ -17,6 +17,7 @@ from codex_statusbar import (
     StatusbarInstanceGuard,
     _wsl_distro_names,
     autostart_enabled,
+    clamp_window_position,
     disable_autostart,
     discover_wsl_codex_homes,
     enable_autostart,
@@ -130,6 +131,12 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class MultiSessionBoardTests(unittest.TestCase):
+    def test_saved_window_position_is_clamped_to_visible_screen(self) -> None:
+        self.assertEqual(clamp_window_position(100, 120, 1920, 1080), (100, 120))
+        self.assertEqual(clamp_window_position(-500, -40, 1920, 1080), (16, 16))
+        self.assertEqual(clamp_window_position(5000, 3000, 1920, 1080), (1144, 932))
+        self.assertEqual(clamp_window_position(50, 50, 0, 0), (30, 30))
+
     def test_mini_header_shows_state_summary_and_count(self) -> None:
         self.assertEqual(mini_header_text("working", "Thinking", 2), "Working (2)")
         self.assertEqual(mini_header_text("reconnecting", "Desktop reconnecting", 1), "Reconnect (1)")
