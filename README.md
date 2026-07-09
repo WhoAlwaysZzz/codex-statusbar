@@ -1,5 +1,7 @@
 # Codex Statusbar
 
+[![CI](https://github.com/WhoAlwaysZzz/codex-statusbar/actions/workflows/ci.yml/badge.svg)](https://github.com/WhoAlwaysZzz/codex-statusbar/actions/workflows/ci.yml)
+
 Local Windows statusbar and watchdog utilities for OpenAI Codex Desktop and Codex CLI sessions.
 
 The project currently lives in:

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-checks:
+    name: Python checks (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile scripts
+        shell: pwsh
+        run: >
+          python -m py_compile
+          outputs/codex-statusbar/codex_statusbar.py
+          outputs/codex-statusbar/codex_guard.py
+          outputs/codex-statusbar/codex_appserver.py
+          outputs/codex-statusbar/codex_watchdog.py
+
+      - name: Run tests
+        shell: pwsh
+        run: >
+          python -m unittest
+          outputs/codex-statusbar/test_codex_statusbar.py
+          outputs/codex-statusbar/test_codex_appserver.py
+          outputs/codex-statusbar/test_codex_watchdog.py
