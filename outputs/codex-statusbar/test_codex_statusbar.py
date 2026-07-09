@@ -14,11 +14,18 @@ from codex_statusbar import (
     StatusSnapshot,
     _wsl_distro_names,
     discover_wsl_codex_homes,
+    full_window_geometry_for_count,
     parse_args,
 )
 
 
 class MultiSessionBoardTests(unittest.TestCase):
+    def test_full_window_height_grows_with_visible_sessions(self) -> None:
+        self.assertEqual(full_window_geometry_for_count(0), "760x132")
+        self.assertEqual(full_window_geometry_for_count(1), "760x132")
+        self.assertEqual(full_window_geometry_for_count(3), "760x204")
+        self.assertEqual(full_window_geometry_for_count(20), "760x384")
+
     def test_scan_all_keeps_multiple_active_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

@@ -34,7 +34,11 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 
 APP_NAME = "Codex Statusbar"
-FULL_WINDOW_GEOMETRY = "760x132"
+FULL_WINDOW_WIDTH = 760
+FULL_WINDOW_MIN_HEIGHT = 132
+FULL_WINDOW_ROW_HEIGHT = 36
+FULL_WINDOW_MAX_HEIGHT = 384
+FULL_WINDOW_GEOMETRY = f"{FULL_WINDOW_WIDTH}x{FULL_WINDOW_MIN_HEIGHT}"
 MINI_WINDOW_GEOMETRY = "230x42"
 DEFAULT_STALE_SECONDS = 300
 DEFAULT_POLL_SECONDS = 2.0
@@ -82,6 +86,13 @@ class StatusBoard:
     primary: StatusSnapshot
     snapshots: list[StatusSnapshot]
     updated_at: str
+
+
+def full_window_geometry_for_count(session_count: int) -> str:
+    visible_count = max(1, min(session_count, MAX_VISIBLE_SESSIONS))
+    height = FULL_WINDOW_MIN_HEIGHT + ((visible_count - 1) * FULL_WINDOW_ROW_HEIGHT)
+    height = min(height, FULL_WINDOW_MAX_HEIGHT)
+    return f"{FULL_WINDOW_WIDTH}x{height}"
 
 
 class WindowsTrayIcon:
@@ -1338,8 +1349,8 @@ class StatusBarApp:
             self._render_mini(board, bg)
             return
 
-        self._show_full_widgets()
         count = len(board.snapshots)
+        self._show_full_widgets(count)
         attention = sum(1 for item in board.snapshots if item.needs_human)
         self.header_var.set(f"Codex sessions ({count})")
         summary = self._clip_text(board.primary.label)
@@ -1380,7 +1391,7 @@ class StatusBarApp:
         self.root.minsize(230, 42)
         self.root.geometry(MINI_WINDOW_GEOMETRY)
 
-    def _show_full_widgets(self) -> None:
+    def _show_full_widgets(self, session_count: int) -> None:
         self.header.grid()
         self.summary.grid()
         self.task_frame.grid()
@@ -1389,7 +1400,7 @@ class StatusBarApp:
         self.card.grid_columnconfigure(0, minsize=380)
         self.root.minsize(720, 92)
         self.root.update_idletasks()
-        self.root.geometry(FULL_WINDOW_GEOMETRY)
+        self.root.geometry(full_window_geometry_for_count(session_count))
 
     def _clear_task_rows(self) -> None:
         for row in self.task_rows:
