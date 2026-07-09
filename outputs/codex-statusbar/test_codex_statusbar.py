@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -12,11 +13,71 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from codex_statusbar import (
     CodexSessionWatcher,
     StatusSnapshot,
+    StatusbarInstanceGuard,
     _wsl_distro_names,
     discover_wsl_codex_homes,
     full_window_geometry_for_count,
     parse_args,
 )
+
+
+class StatusbarInstanceTests(unittest.TestCase):
+    def test_first_statusbar_launch_writes_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state_dir = Path(raw)
+            guard = StatusbarInstanceGuard.acquire(state_dir)
+            try:
+                self.assertTrue(guard.acquired)
+                payload = json.loads((state_dir / "statusbar.pid").read_text(encoding="utf-8"))
+                self.assertEqual(payload["pid"], os.getpid())
+            finally:
+                guard.release()
+
+            self.assertFalse((state_dir / "statusbar.pid").exists())
+
+    def test_second_statusbar_launch_requests_existing_window(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state_dir = Path(raw)
+            (state_dir / "statusbar.pid").write_text(
+                json.dumps({"pid": 12345}),
+                encoding="utf-8",
+            )
+
+            with patch("codex_statusbar.process_is_alive", return_value=True):
+                guard = StatusbarInstanceGuard.acquire(state_dir)
+
+            self.assertFalse(guard.acquired)
+            self.assertEqual(guard.owner_pid, 12345)
+            payload = json.loads((state_dir / "statusbar-control.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["action"], "show")
+
+    def test_stale_statusbar_pid_is_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state_dir = Path(raw)
+            (state_dir / "statusbar.pid").write_text(
+                json.dumps({"pid": 12345}),
+                encoding="utf-8",
+            )
+
+            with patch("codex_statusbar.process_is_alive", return_value=False):
+                guard = StatusbarInstanceGuard.acquire(state_dir)
+            try:
+                self.assertTrue(guard.acquired)
+                payload = json.loads((state_dir / "statusbar.pid").read_text(encoding="utf-8"))
+                self.assertEqual(payload["pid"], os.getpid())
+                self.assertFalse((state_dir / "statusbar-control.json").exists())
+            finally:
+                guard.release()
+
+    def test_allow_multiple_does_not_claim_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            state_dir = Path(raw)
+
+            guard = StatusbarInstanceGuard.acquire(state_dir, allow_multiple=True)
+
+            self.assertTrue(guard.acquired)
+            self.assertFalse(guard.owns_pid_file)
+            self.assertFalse((state_dir / "statusbar.pid").exists())
 
 
 class MultiSessionBoardTests(unittest.TestCase):

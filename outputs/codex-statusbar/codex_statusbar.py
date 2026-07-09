@@ -95,6 +95,117 @@ def full_window_geometry_for_count(session_count: int) -> str:
     return f"{FULL_WINDOW_WIDTH}x{height}"
 
 
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def process_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        error_access_denied = 5
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ctypes.set_last_error(0)
+        handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+        if not handle:
+            return ctypes.get_last_error() == error_access_denied
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+@dataclass
+class StatusbarInstanceGuard:
+    state_dir: Path
+    acquired: bool
+    owner_pid: int | None = None
+    owns_pid_file: bool = True
+
+    @property
+    def pid_file(self) -> Path:
+        return self.state_dir / "statusbar.pid"
+
+    @property
+    def control_file(self) -> Path:
+        return self.state_dir / "statusbar-control.json"
+
+    @classmethod
+    def acquire(cls, state_dir: Path, *, allow_multiple: bool = False) -> "StatusbarInstanceGuard":
+        guard = cls(state_dir=state_dir, acquired=True)
+        if allow_multiple:
+            return cls(state_dir=state_dir, acquired=True, owns_pid_file=False)
+        current_pid = os.getpid()
+        existing = _read_json_object(guard.pid_file)
+        owner_pid = existing.get("pid")
+        if isinstance(owner_pid, int) and owner_pid != current_pid and process_is_alive(owner_pid):
+            existing_guard = cls(
+                state_dir=state_dir,
+                acquired=False,
+                owner_pid=owner_pid,
+                owns_pid_file=False,
+            )
+            existing_guard.request_show()
+            return existing_guard
+        guard.write_pid()
+        return guard
+
+    def write_pid(self) -> None:
+        if not self.acquired or not self.owns_pid_file:
+            return
+        _write_json_atomic(
+            self.pid_file,
+            {
+                "pid": os.getpid(),
+                "started_at": now_iso(),
+            },
+        )
+
+    def request_show(self) -> None:
+        _write_json_atomic(
+            self.control_file,
+            {
+                "action": "show",
+                "requested_at": now_iso(),
+                "requester_pid": os.getpid(),
+            },
+        )
+
+    def release(self) -> None:
+        if not self.acquired or not self.owns_pid_file:
+            return
+        current = _read_json_object(self.pid_file)
+        if current.get("pid") != os.getpid():
+            return
+        try:
+            self.pid_file.unlink()
+        except OSError:
+            pass
+
+
 class WindowsTrayIcon:
     def __init__(self, app: "StatusBarApp") -> None:
         self.app = app
@@ -1144,9 +1255,15 @@ class CodexSessionWatcher:
 
 
 class StatusBarApp:
-    def __init__(self, watcher: CodexSessionWatcher, poll_seconds: float) -> None:
+    def __init__(
+        self,
+        watcher: CodexSessionWatcher,
+        poll_seconds: float,
+        instance_guard: StatusbarInstanceGuard | None = None,
+    ) -> None:
         self.watcher = watcher
         self.poll_seconds = poll_seconds
+        self.instance_guard = instance_guard
         self.ui_settings_path = watcher.state_dir / "ui_settings.json"
         self.ui_settings = self._load_ui_settings()
         self.root = tk.Tk()
@@ -1301,8 +1418,25 @@ class StatusBarApp:
 
     def tick(self) -> None:
         self.tray.pump()
+        self._process_control_request()
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
+
+    def _process_control_request(self) -> None:
+        if (
+            not self.instance_guard
+            or not self.instance_guard.acquired
+            or not self.instance_guard.owns_pid_file
+        ):
+            return
+        payload = _read_json_object(self.instance_guard.control_file)
+        if payload.get("action") != "show":
+            return
+        try:
+            self.instance_guard.control_file.unlink()
+        except OSError:
+            pass
+        self.show_from_tray()
 
     def refresh_now(self) -> None:
         def worker() -> None:
@@ -1514,6 +1648,9 @@ class StatusBarApp:
 
     def close(self) -> None:
         self._save_ui_settings()
+        if self.instance_guard:
+            self.instance_guard.release()
+            self.instance_guard = None
         self.tray.remove()
         self.root.destroy()
 
@@ -1649,6 +1786,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Scan once, print status JSON, and exit without opening the UI.",
     )
+    parser.add_argument(
+        "--allow-multiple",
+        action="store_true",
+        help="Allow multiple statusbar windows. By default, a second launch shows the existing window.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1665,8 +1807,24 @@ def main(argv: list[str]) -> int:
         print(json.dumps(asdict(snapshot), ensure_ascii=False, indent=2))
         return 0
 
-    app = StatusBarApp(watcher, poll_seconds=max(0.5, args.poll_seconds))
-    app.run()
+    instance_guard = StatusbarInstanceGuard.acquire(
+        args.state_dir.expanduser(),
+        allow_multiple=args.allow_multiple,
+    )
+    if not instance_guard.acquired:
+        owner = instance_guard.owner_pid or "unknown"
+        print(f"{APP_NAME} is already running (pid {owner}); requested that window to show.")
+        return 0
+
+    try:
+        app = StatusBarApp(
+            watcher,
+            poll_seconds=max(0.5, args.poll_seconds),
+            instance_guard=instance_guard,
+        )
+        app.run()
+    finally:
+        instance_guard.release()
     return 0
 
 

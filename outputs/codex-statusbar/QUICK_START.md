@@ -10,6 +10,8 @@
 Start-Process codex-stat
 ```
 
+如果状态栏已经在运行，再执行一次会唤醒已有窗口，不会再开一个重复窗口。
+
 打开全局守护：
 
 ```powershell
@@ -44,6 +46,7 @@ codex-stat [参数]
 | `--stale-seconds <秒>` | `300` | 多久没有事件后显示疑似卡住 |
 | `--poll-seconds <秒>` | `2` | 状态栏刷新间隔 |
 | `--once` | 关闭 | 只扫描一次并打印 JSON，不打开窗口 |
+| `--allow-multiple` | 关闭 | 允许同时打开多个状态栏窗口 |
 
 常用例子：
 
