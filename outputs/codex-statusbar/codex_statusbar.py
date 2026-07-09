@@ -49,6 +49,7 @@ MAX_FILES = 60
 MAX_FILE_BYTES = 1_500_000
 MAX_VISIBLE_SESSIONS = 8
 MAX_DISPLAY_CHARS = 20
+AUTOSTART_FILE_NAME = "codex-statusbar.cmd"
 
 
 PALETTE = {
@@ -136,6 +137,80 @@ def process_is_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def windows_startup_dir(appdata: str | None = None) -> Path | None:
+    root = appdata if appdata is not None else os.environ.get("APPDATA")
+    if not root:
+        return None
+    return Path(root) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+
+
+def autostart_file_path(startup_dir: Path | None = None) -> Path | None:
+    folder = startup_dir if startup_dir is not None else windows_startup_dir()
+    if folder is None:
+        return None
+    return folder / AUTOSTART_FILE_NAME
+
+
+def _cmd_quote(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def statusbar_launch_command() -> list[str]:
+    script_dir = Path(__file__).resolve().parent
+    bundled_launcher = script_dir / "codex-stat.exe"
+    if bundled_launcher.exists():
+        return [str(bundled_launcher)]
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, str(Path(__file__).resolve())]
+
+
+def render_autostart_cmd(command: list[str] | None = None) -> str:
+    parts = command or statusbar_launch_command()
+    quoted = " ".join(_cmd_quote(part) for part in parts)
+    return "\n".join(
+        [
+            "@echo off",
+            "chcp 65001 >nul",
+            "rem Created by Codex Statusbar. Delete this file to disable autostart.",
+            f"start \"\" /min {quoted}",
+            "",
+        ]
+    )
+
+
+def enable_autostart(
+    startup_dir: Path | None = None,
+    command: list[str] | None = None,
+) -> Path:
+    path = autostart_file_path(startup_dir)
+    if path is None:
+        raise RuntimeError("Windows Startup folder was not found.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(render_autostart_cmd(command), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def disable_autostart(startup_dir: Path | None = None) -> bool:
+    path = autostart_file_path(startup_dir)
+    if path is None:
+        return False
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise
+    return True
+
+
+def autostart_enabled(startup_dir: Path | None = None) -> bool:
+    path = autostart_file_path(startup_dir)
+    return bool(path and path.exists())
 
 
 @dataclass
@@ -303,6 +378,7 @@ class WindowsTrayIcon:
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, mode_label)
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1004, "Refresh")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1005, "Logs")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1006, self.app.autostart_label())
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1003, "Exit")
             pos = win32gui.GetCursorPos()
@@ -335,6 +411,8 @@ class WindowsTrayIcon:
         elif command_id == 1005:
             self.app.show_from_tray()
             self.app.open_logs()
+        elif command_id == 1006:
+            self.app.toggle_autostart()
         return 0
 
     def _on_destroy(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
@@ -1411,6 +1489,7 @@ class StatusBarApp:
         self.context_menu.add_command(label=mode_label, command=self.toggle_mini_mode)
         self.context_menu.add_command(label="Hide to tray", command=self.minimize_to_tray)
         self.context_menu.add_command(label="Open logs", command=self.open_logs)
+        self.context_menu.add_command(label=self.autostart_label(), command=self.toggle_autostart)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Exit", command=self.close)
         self.context_menu.tk_popup(event.x_root, event.y_root)
@@ -1691,6 +1770,25 @@ class StatusBarApp:
         except OSError as exc:
             messagebox.showerror(APP_NAME, f"Could not open log folder:\n{exc}")
 
+    def autostart_label(self) -> str:
+        return "Disable autostart" if autostart_enabled() else "Enable autostart"
+
+    def toggle_autostart(self) -> None:
+        try:
+            if autostart_enabled():
+                disable_autostart()
+                message = "Autostart disabled."
+            else:
+                path = enable_autostart()
+                message = f"Autostart enabled:\n{path}"
+        except OSError as exc:
+            messagebox.showerror(APP_NAME, f"Could not update autostart:\n{exc}")
+            return
+        except RuntimeError as exc:
+            messagebox.showerror(APP_NAME, str(exc))
+            return
+        messagebox.showinfo(APP_NAME, message)
+
     def run(self) -> None:
         self.root.mainloop()
 
@@ -1791,11 +1889,41 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Allow multiple statusbar windows. By default, a second launch shows the existing window.",
     )
+    autostart_group = parser.add_mutually_exclusive_group()
+    autostart_group.add_argument(
+        "--enable-autostart",
+        action="store_true",
+        help="Create a Windows Startup entry for codex-stat and exit.",
+    )
+    autostart_group.add_argument(
+        "--disable-autostart",
+        action="store_true",
+        help="Remove the Windows Startup entry for codex-stat and exit.",
+    )
+    autostart_group.add_argument(
+        "--autostart-status",
+        action="store_true",
+        help="Print whether the Windows Startup entry is enabled and exit.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.enable_autostart:
+        path = enable_autostart()
+        print(f"Autostart enabled: {path}")
+        return 0
+    if args.disable_autostart:
+        removed = disable_autostart()
+        state = "disabled" if removed else "already disabled"
+        print(f"Autostart {state}.")
+        return 0
+    if args.autostart_status:
+        state = "enabled" if autostart_enabled() else "disabled"
+        print(f"Autostart is {state}.")
+        return 0
+
     codex_homes = args.codex_home or default_codex_homes()
     watcher = CodexSessionWatcher(
         codex_home=[home.expanduser() for home in codex_homes],

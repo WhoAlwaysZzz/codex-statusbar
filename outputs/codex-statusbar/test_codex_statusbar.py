@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sqlite3
@@ -15,10 +16,57 @@ from codex_statusbar import (
     StatusSnapshot,
     StatusbarInstanceGuard,
     _wsl_distro_names,
+    autostart_enabled,
+    disable_autostart,
     discover_wsl_codex_homes,
+    enable_autostart,
     full_window_geometry_for_count,
+    main,
     parse_args,
+    render_autostart_cmd,
+    windows_startup_dir,
 )
+
+
+class AutostartTests(unittest.TestCase):
+    def test_windows_startup_dir_uses_appdata(self) -> None:
+        path = windows_startup_dir("C:/Users/demo/AppData/Roaming")
+
+        self.assertEqual(
+            str(path).replace("\\", "/"),
+            "C:/Users/demo/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+        )
+
+    def test_render_autostart_cmd_quotes_command_parts(self) -> None:
+        text = render_autostart_cmd(["C:/Tools/codex-stat.exe", "--allow-multiple"])
+
+        self.assertIn("chcp 65001 >nul", text)
+        self.assertIn('start "" /min "C:/Tools/codex-stat.exe" "--allow-multiple"', text)
+        self.assertTrue(text.endswith("\n"))
+
+    def test_enable_and_disable_autostart_file(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            startup_dir = Path(raw)
+
+            path = enable_autostart(startup_dir, command=["C:/Tools/codex-stat.exe"])
+
+            self.assertTrue(path.exists())
+            self.assertTrue(autostart_enabled(startup_dir))
+            self.assertIn("codex-stat.exe", path.read_text(encoding="utf-8"))
+            self.assertTrue(disable_autostart(startup_dir))
+            self.assertFalse(autostart_enabled(startup_dir))
+            self.assertFalse(disable_autostart(startup_dir))
+
+    def test_autostart_cli_actions_exit_before_scanning(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            with patch.dict(os.environ, {"APPDATA": raw}):
+                with patch("codex_statusbar.default_codex_homes") as default_homes:
+                    with patch("sys.stdout", new_callable=io.StringIO):
+                        self.assertEqual(main(["--enable-autostart"]), 0)
+                        self.assertEqual(main(["--autostart-status"]), 0)
+                        self.assertEqual(main(["--disable-autostart"]), 0)
+
+            default_homes.assert_not_called()
 
 
 class StatusbarInstanceTests(unittest.TestCase):

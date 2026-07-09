@@ -12,6 +12,8 @@ Start-Process codex-stat
 
 如果状态栏已经在运行，再执行一次会唤醒已有窗口，不会再开一个重复窗口。
 
+右键状态栏或托盘图标，可以开启或关闭开机启动。
+
 打开全局守护：
 
 ```powershell
@@ -47,12 +49,17 @@ codex-stat [参数]
 | `--poll-seconds <秒>` | `2` | 状态栏刷新间隔 |
 | `--once` | 关闭 | 只扫描一次并打印 JSON，不打开窗口 |
 | `--allow-multiple` | 关闭 | 允许同时打开多个状态栏窗口 |
+| `--enable-autostart` | 关闭 | 写入 Windows 开机启动项后退出 |
+| `--disable-autostart` | 关闭 | 删除 Windows 开机启动项后退出 |
+| `--autostart-status` | 关闭 | 查看开机启动是否已启用 |
 
 常用例子：
 
 ```powershell
 codex-stat --once
 codex-stat --stale-seconds 600
+codex-stat --enable-autostart
+codex-stat --disable-autostart
 ```
 
 ## WSL Codex CLI
