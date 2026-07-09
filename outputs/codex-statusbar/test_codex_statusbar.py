@@ -16,6 +16,7 @@ from codex_statusbar import (
     StatusSnapshot,
     StatusbarInstanceGuard,
     _wsl_distro_names,
+    always_on_top_label,
     autostart_enabled,
     clamp_window_position,
     disable_autostart,
@@ -131,6 +132,10 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class MultiSessionBoardTests(unittest.TestCase):
+    def test_always_on_top_menu_label_reflects_state(self) -> None:
+        self.assertEqual(always_on_top_label(True), "Disable always on top")
+        self.assertEqual(always_on_top_label(False), "Enable always on top")
+
     def test_saved_window_position_is_clamped_to_visible_screen(self) -> None:
         self.assertEqual(clamp_window_position(100, 120, 1920, 1080), (100, 120))
         self.assertEqual(clamp_window_position(-500, -40, 1920, 1080), (16, 16))

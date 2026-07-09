@@ -136,6 +136,10 @@ def mini_header_text(
     return f"{summary} ({max(0, session_count)})"
 
 
+def always_on_top_label(enabled: bool) -> str:
+    return "Disable always on top" if enabled else "Enable always on top"
+
+
 def clamp_window_position(
     x: int,
     y: int,
@@ -438,6 +442,7 @@ class WindowsTrayIcon:
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, mode_label)
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1004, "Refresh")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1005, "Logs")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1007, always_on_top_label(self.app.always_on_top))
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1006, self.app.autostart_label())
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1003, "Exit")
@@ -473,6 +478,8 @@ class WindowsTrayIcon:
             self.app.open_logs()
         elif command_id == 1006:
             self.app.toggle_autostart()
+        elif command_id == 1007:
+            self.app.toggle_always_on_top()
         return 0
 
     def _on_destroy(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
@@ -1408,7 +1415,8 @@ class StatusBarApp:
         self.root.title(APP_NAME)
         self.root.geometry(self._initial_position())
         self.root.minsize(720, 92)
-        self.root.attributes("-topmost", True)
+        self.always_on_top = self._load_bool_setting("always_on_top", default=True)
+        self.root.attributes("-topmost", self.always_on_top)
         self.root.overrideredirect(True)
         self.root.configure(bg=TEXT_FG)
         self._drag_start: tuple[int, int] | None = None
@@ -1551,6 +1559,7 @@ class StatusBarApp:
         self.context_menu.add_command(label=mode_label, command=self.toggle_mini_mode)
         self.context_menu.add_command(label="Hide to tray", command=self.minimize_to_tray)
         self.context_menu.add_command(label="Open logs", command=self.open_logs)
+        self.context_menu.add_command(label=always_on_top_label(self.always_on_top), command=self.toggle_always_on_top)
         self.context_menu.add_command(label=self.autostart_label(), command=self.toggle_autostart)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Exit", command=self.close)
@@ -1794,7 +1803,15 @@ class StatusBarApp:
     def show_from_tray(self) -> None:
         self.root.deiconify()
         self.root.lift()
-        self.root.attributes("-topmost", True)
+        self.root.attributes("-topmost", self.always_on_top)
+
+    def toggle_always_on_top(self) -> None:
+        self.set_always_on_top(not self.always_on_top)
+
+    def set_always_on_top(self, enabled: bool) -> None:
+        self.always_on_top = enabled
+        self.root.attributes("-topmost", enabled)
+        self._save_ui_settings()
 
     def close(self) -> None:
         self._save_ui_settings()
@@ -1824,11 +1841,16 @@ class StatusBarApp:
             return {}
         return raw if isinstance(raw, dict) else {}
 
+    def _load_bool_setting(self, key: str, *, default: bool) -> bool:
+        value = self.ui_settings.get(key)
+        return value if isinstance(value, bool) else default
+
     def _save_ui_settings(self) -> None:
         settings = {
             "x": int(self.root.winfo_x()),
             "y": int(self.root.winfo_y()),
             "mini_mode": self.mini_mode,
+            "always_on_top": self.always_on_top,
         }
         tmp = self.ui_settings_path.with_suffix(".json.tmp")
         try:
