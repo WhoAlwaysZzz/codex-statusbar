@@ -1,17 +1,17 @@
 # Codex Statusbar MVP
 
-一个零依赖 Windows 小状态栏，用来旁路观察本机 Codex session。
+一个本地 Windows 小状态栏，用来旁路观察本机 Codex Desktop / CLI session。默认会读取 Windows `%USERPROFILE%\.codex`，并尽量自动发现 WSL 发行版里的 `.codex`。
 
 更详细、按步骤测试的说明见：
 
 ```text
-USER_MANUAL.md
+QUICK_START.md
 ```
 
 ## 运行
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\run-statusbar.ps1
+Start-Process codex-stat
 ```
 
 窗口会常驻置顶，可以拖动。它只读取本地文件，不会自动发送消息、切代理、审批命令或修改 Codex 配置。
@@ -19,7 +19,7 @@ powershell -ExecutionPolicy Bypass -File .\run-statusbar.ps1
 如果本目录已经在 PATH 里，也可以直接：
 
 ```powershell
-codex-statusbar
+codex-stat
 ```
 
 ## 全局 Desktop/session 守护
@@ -111,12 +111,13 @@ powershell -ExecutionPolicy Bypass -File .\run-appserver.ps1 "你的任务描述
 
 ```text
 %USERPROFILE%\.codex\sessions
+\\wsl.localhost\<Distro>\home\<User>\.codex\sessions
 ```
 
-如果设置了 `CODEX_HOME`，则读取：
+如果设置了 `CODEX_HOME`，会优先把它作为 Windows 侧默认 Codex home。也可以重复传 `--codex-home` 手动指定多个来源：
 
-```text
-%CODEX_HOME%\sessions
+```powershell
+codex-stat --codex-home "$env:USERPROFILE\.codex" --codex-home "\\wsl.localhost\<Distro>\home\<User>\.codex"
 ```
 
 ## 日志

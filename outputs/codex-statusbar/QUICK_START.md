@@ -56,28 +56,28 @@ codex-stat --stale-seconds 600
 
 statusbar 是 Windows 窗口，但可以读取 WSL 里的 Codex CLI session。默认启动 `codex-stat` 时会自动扫描 Windows `.codex` 和能发现的 WSL `.codex`。
 
-你的默认 WSL 是 `Ubuntu`，WSL 用户是 `zzz07`，所以 WSL Codex home 是：
+WSL Codex home 通常类似：
 
 ```text
-\\wsl.localhost\Ubuntu\home\zzz07\.codex
+\\wsl.localhost\<Distro>\home\<User>\.codex
 ```
 
 只看 WSL Codex CLI，或者自动发现失败时手动指定：
 
 ```powershell
-Start-Process codex-stat -ArgumentList '--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'
+Start-Process codex-stat -ArgumentList '--codex-home','\\wsl.localhost\<Distro>\home\<User>\.codex'
 ```
 
 手动同时指定 Windows Codex 和 WSL Codex CLI：
 
 ```powershell
-Start-Process codex-stat -ArgumentList '--codex-home',"$env:USERPROFILE\.codex",'--codex-home','\\wsl.localhost\Ubuntu\home\zzz07\.codex'
+Start-Process codex-stat -ArgumentList '--codex-home',"$env:USERPROFILE\.codex",'--codex-home','\\wsl.localhost\<Distro>\home\<User>\.codex'
 ```
 
 从 WSL 里启动 Windows statusbar：
 
 ```bash
-powershell.exe -NoProfile -Command 'Start-Process codex-stat -ArgumentList "--codex-home","\\\\wsl.localhost\\Ubuntu\\home\\zzz07\\.codex"'
+powershell.exe -NoProfile -Command 'Start-Process codex-stat -ArgumentList "--codex-home","\\\\wsl.localhost\\<Distro>\\home\\<User>\\.codex"'
 ```
 
 ## watchdog 参数

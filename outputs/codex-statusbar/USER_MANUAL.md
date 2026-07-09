@@ -1,4 +1,4 @@
-# Codex Statusbar 使用手册
+﻿# Codex Statusbar 使用手册
 
 这份手册是给当前 MVP 用的。它的目标不是把工具讲得很玄，而是让你能一步一步测试：
 
@@ -11,13 +11,13 @@
 当前工具目录：
 
 ```text
-C:\Users\zzz07\Documents\Codex\2026-07-04\openai-codex-desktop-cli-codex-codex\outputs\codex-statusbar
+<repo>\outputs\codex-statusbar
 ```
 
 下面的命令默认在这个目录运行：
 
 ```powershell
-cd C:\Users\zzz07\Documents\Codex\2026-07-04\openai-codex-desktop-cli-codex-codex\outputs\codex-statusbar
+cd <repo>\outputs\codex-statusbar
 ```
 
 ## 先看结论
@@ -114,7 +114,7 @@ powershell -ExecutionPolicy Bypass -File .\run-statusbar.ps1 --once
 如果它能看到最近 session，`source_file` 通常会指向：
 
 ```text
-C:\Users\zzz07\.codex\sessions\...\*.jsonl
+%USERPROFILE%\.codex\sessions\...\*.jsonl
 ```
 
 这种被动监控的优点是简单、安全、不会干预 Codex。
@@ -332,7 +332,7 @@ powershell -ExecutionPolicy Bypass -File .\run-appserver.ps1 --appserver-arg --d
 在你的机器上通常是：
 
 ```text
-C:\Users\zzz07\AppData\Local\CodexStatusbar
+%LOCALAPPDATA%\CodexStatusbar
 ```
 
 主要文件：
@@ -567,21 +567,21 @@ powershell -ExecutionPolicy Bypass -File .\run-appserver.ps1 --stale-seconds 600
 开一个 PowerShell 跑状态栏：
 
 ```powershell
-cd C:\Users\zzz07\Documents\Codex\2026-07-04\openai-codex-desktop-cli-codex-codex\outputs\codex-statusbar
+cd <repo>\outputs\codex-statusbar
 powershell -ExecutionPolicy Bypass -File .\run-statusbar.ps1
 ```
 
 再开另一个 PowerShell 跑托管任务：
 
 ```powershell
-cd C:\Users\zzz07\Documents\Codex\2026-07-04\openai-codex-desktop-cli-codex-codex\outputs\codex-statusbar
+cd <repo>\outputs\codex-statusbar
 powershell -ExecutionPolicy Bypass -File .\run-guarded.ps1 "你的任务"
 ```
 
 或者测试 app-server 路线：
 
 ```powershell
-cd C:\Users\zzz07\Documents\Codex\2026-07-04\openai-codex-desktop-cli-codex-codex\outputs\codex-statusbar
+cd <repo>\outputs\codex-statusbar
 powershell -ExecutionPolicy Bypass -File .\run-appserver.ps1 "你的任务"
 ```
 
@@ -593,3 +593,4 @@ powershell -ExecutionPolicy Bypass -File .\run-appserver.ps1 "你的任务"
 %LOCALAPPDATA%\CodexStatusbar\guard_status.json
 %LOCALAPPDATA%\CodexStatusbar\appserver_status.json
 ```
+
