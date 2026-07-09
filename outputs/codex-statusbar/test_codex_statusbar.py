@@ -22,6 +22,7 @@ from codex_statusbar import (
     enable_autostart,
     full_window_geometry_for_count,
     main,
+    mini_header_text,
     parse_args,
     render_autostart_cmd,
     windows_startup_dir,
@@ -129,6 +130,15 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class MultiSessionBoardTests(unittest.TestCase):
+    def test_mini_header_shows_state_summary_and_count(self) -> None:
+        self.assertEqual(mini_header_text("working", "Thinking", 2), "Working (2)")
+        self.assertEqual(mini_header_text("reconnecting", "Desktop reconnecting", 1), "Reconnect (1)")
+        self.assertEqual(
+            mini_header_text("waiting", "Waiting approval", 3, needs_human=True),
+            "Attention (3)",
+        )
+        self.assertEqual(mini_header_text("custom", "Custom state", -1), "Custom state (0)")
+
     def test_full_window_height_grows_with_visible_sessions(self) -> None:
         self.assertEqual(full_window_geometry_for_count(0), "760x132")
         self.assertEqual(full_window_geometry_for_count(1), "760x132")

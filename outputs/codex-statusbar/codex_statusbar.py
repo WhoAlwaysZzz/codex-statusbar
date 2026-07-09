@@ -78,6 +78,19 @@ PALETTE = {
     "idle": ("#334155", CARD_BG),
 }
 
+MINI_STATE_LABELS = {
+    "working": "Working",
+    "outputting": "Output",
+    "executing": "Command",
+    "waiting": "Waiting",
+    "recovering": "Recovering",
+    "reconnecting": "Reconnect",
+    "stale": "Stale",
+    "completed": "Done",
+    "failed": "Failed",
+    "idle": "Idle",
+}
+
 
 @dataclass
 class StatusSnapshot:
@@ -107,6 +120,20 @@ def full_window_geometry_for_count(session_count: int) -> str:
     height = FULL_WINDOW_MIN_HEIGHT + ((visible_count - 1) * FULL_WINDOW_ROW_HEIGHT)
     height = min(height, FULL_WINDOW_MAX_HEIGHT)
     return f"{FULL_WINDOW_WIDTH}x{height}"
+
+
+def mini_header_text(
+    state: str,
+    label: str,
+    session_count: int,
+    *,
+    needs_human: bool = False,
+) -> str:
+    if needs_human:
+        summary = "Attention"
+    else:
+        summary = MINI_STATE_LABELS.get(state) or label or "Codex"
+    return f"{summary} ({max(0, session_count)})"
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -1615,12 +1642,21 @@ class StatusBarApp:
         self.header.grid()
         count = len(board.snapshots)
         self.card.grid_columnconfigure(0, minsize=72)
-        self.header_var.set(f"Codex ({count})")
+        self.header.configure(anchor="center")
+        self.header_var.set(
+            mini_header_text(
+                board.primary.state,
+                board.primary.label,
+                count,
+                needs_human=board.primary.needs_human,
+            )
+        )
         self.root.minsize(230, 42)
         self.root.geometry(MINI_WINDOW_GEOMETRY)
 
     def _show_full_widgets(self, session_count: int) -> None:
         self.header.grid()
+        self.header.configure(anchor="w")
         self.summary.grid()
         self.task_frame.grid()
         self.refresh_btn.grid()
