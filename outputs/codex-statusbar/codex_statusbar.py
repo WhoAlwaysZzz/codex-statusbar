@@ -1124,16 +1124,18 @@ class StatusBarApp:
     def __init__(self, watcher: CodexSessionWatcher, poll_seconds: float) -> None:
         self.watcher = watcher
         self.poll_seconds = poll_seconds
+        self.ui_settings_path = watcher.state_dir / "ui_settings.json"
+        self.ui_settings = self._load_ui_settings()
         self.root = tk.Tk()
         self.root.title(APP_NAME)
-        self.root.geometry("+30+30")
+        self.root.geometry(self._initial_position())
         self.root.minsize(720, 92)
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.configure(bg="#0f172a")
         self._drag_start: tuple[int, int] | None = None
         self._last_render_signature: tuple[Any, ...] | None = None
-        self.mini_mode = False
+        self.mini_mode = bool(self.ui_settings.get("mini_mode"))
         self.last_board: StatusBoard | None = None
 
         self.shell = tk.Frame(self.root, bg="#0f172a", padx=8, pady=8)
@@ -1196,7 +1198,7 @@ class StatusBarApp:
 
         self.mini_btn = tk.Button(
             self.card,
-            text="Mini",
+            text="Full" if self.mini_mode else "Mini",
             command=self.toggle_mini_mode,
             relief="flat",
             bg="#e2e8f0",
@@ -1255,6 +1257,7 @@ class StatusBarApp:
             return
         dx, dy = self._drag_start
         self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+        self._save_ui_settings()
 
     def tick(self) -> None:
         self.tray.pump()
@@ -1458,6 +1461,7 @@ class StatusBarApp:
         self.mini_mode = enabled
         self.mini_btn.configure(text="Full" if enabled else "Mini")
         self._last_render_signature = None
+        self._save_ui_settings()
         if self.last_board:
             self.render_board(self.last_board)
 
@@ -1470,8 +1474,39 @@ class StatusBarApp:
         self.root.attributes("-topmost", True)
 
     def close(self) -> None:
+        self._save_ui_settings()
         self.tray.remove()
         self.root.destroy()
+
+    def _initial_position(self) -> str:
+        x = self.ui_settings.get("x")
+        y = self.ui_settings.get("y")
+        if isinstance(x, int) and isinstance(y, int):
+            return f"+{x}+{y}"
+        return "+30+30"
+
+    def _load_ui_settings(self) -> dict[str, Any]:
+        try:
+            raw = json.loads(self.ui_settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _save_ui_settings(self) -> None:
+        settings = {
+            "x": int(self.root.winfo_x()),
+            "y": int(self.root.winfo_y()),
+            "mini_mode": self.mini_mode,
+        }
+        tmp = self.ui_settings_path.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(
+                json.dumps(settings, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp.replace(self.ui_settings_path)
+        except OSError:
+            pass
 
     def open_logs(self) -> None:
         path = self.watcher.state_dir
