@@ -175,22 +175,28 @@ class WindowsTrayIcon:
         if win32gui is None or win32con is None or not self.hwnd:
             return
         menu = win32gui.CreatePopupMenu()
-        win32gui.AppendMenu(menu, win32con.MF_STRING, 1001, "Show")
-        win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, "Mini")
-        win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
-        win32gui.AppendMenu(menu, win32con.MF_STRING, 1003, "Exit")
-        pos = win32gui.GetCursorPos()
-        win32gui.SetForegroundWindow(self.hwnd)
-        win32gui.TrackPopupMenu(
-            menu,
-            win32con.TPM_LEFTALIGN,
-            pos[0],
-            pos[1],
-            0,
-            self.hwnd,
-            None,
-        )
-        win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
+        try:
+            mode_label = "Full" if self.app.mini_mode else "Mini"
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1001, "Show")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, mode_label)
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1004, "Refresh")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1005, "Logs")
+            win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1003, "Exit")
+            pos = win32gui.GetCursorPos()
+            win32gui.SetForegroundWindow(self.hwnd)
+            win32gui.TrackPopupMenu(
+                menu,
+                win32con.TPM_LEFTALIGN,
+                pos[0],
+                pos[1],
+                0,
+                self.hwnd,
+                None,
+            )
+            win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
+        finally:
+            win32gui.DestroyMenu(menu)
 
     def _on_command(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
         command_id = wparam & 0xFFFF
@@ -198,9 +204,15 @@ class WindowsTrayIcon:
             self.app.show_from_tray()
         elif command_id == 1002:
             self.app.show_from_tray()
-            self.app.set_mini_mode(True)
+            self.app.toggle_mini_mode()
         elif command_id == 1003:
             self.app.close()
+        elif command_id == 1004:
+            self.app.show_from_tray()
+            self.app.refresh_now()
+        elif command_id == 1005:
+            self.app.show_from_tray()
+            self.app.open_logs()
         return 0
 
     def _on_destroy(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
@@ -1137,6 +1149,7 @@ class StatusBarApp:
         self._last_render_signature: tuple[Any, ...] | None = None
         self.mini_mode = bool(self.ui_settings.get("mini_mode"))
         self.last_board: StatusBoard | None = None
+        self.context_menu = tk.Menu(self.root, tearoff=0)
 
         self.shell = tk.Frame(self.root, bg="#0f172a", padx=8, pady=8)
         self.shell.pack(fill="both", expand=True)
@@ -1240,8 +1253,7 @@ class StatusBarApp:
             self.card.grid_columnconfigure(column, weight=0)
         self.task_frame.grid_columnconfigure(0, weight=1)
         for widget in [self.shell, self.card, self.header, self.summary, self.task_frame]:
-            widget.bind("<ButtonPress-1>", self.start_drag)
-            widget.bind("<B1-Motion>", self.on_drag)
+            self._bind_window_controls(widget)
 
         self.tray = WindowsTrayIcon(self)
         self.tray.install()
@@ -1258,6 +1270,23 @@ class StatusBarApp:
         dx, dy = self._drag_start
         self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
         self._save_ui_settings()
+
+    def _bind_window_controls(self, widget: tk.Widget) -> None:
+        widget.bind("<ButtonPress-1>", self.start_drag)
+        widget.bind("<B1-Motion>", self.on_drag)
+        widget.bind("<Button-3>", self.show_context_menu)
+
+    def show_context_menu(self, event: tk.Event[Any]) -> None:
+        self.context_menu.delete(0, "end")
+        mode_label = "Full mode" if self.mini_mode else "Mini mode"
+        self.context_menu.add_command(label="Refresh", command=self.refresh_now)
+        self.context_menu.add_command(label=mode_label, command=self.toggle_mini_mode)
+        self.context_menu.add_command(label="Hide to tray", command=self.minimize_to_tray)
+        self.context_menu.add_command(label="Open logs", command=self.open_logs)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Exit", command=self.close)
+        self.context_menu.tk_popup(event.x_root, event.y_root)
+        self.context_menu.grab_release()
 
     def tick(self) -> None:
         self.tray.pump()
@@ -1408,8 +1437,7 @@ class StatusBarApp:
         meta.grid(row=0, column=2, rowspan=2, sticky="e", padx=(10, 0))
 
         for widget in [row, dot, title, detail, meta]:
-            widget.bind("<ButtonPress-1>", self.start_drag)
-            widget.bind("<B1-Motion>", self.on_drag)
+            self._bind_window_controls(widget)
         self.task_rows.append(row)
 
     def _task_title(self, snapshot: StatusSnapshot) -> str:
