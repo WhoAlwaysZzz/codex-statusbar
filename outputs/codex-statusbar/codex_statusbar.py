@@ -50,6 +50,19 @@ MAX_FILE_BYTES = 1_500_000
 MAX_VISIBLE_SESSIONS = 8
 MAX_DISPLAY_CHARS = 20
 AUTOSTART_FILE_NAME = "codex-statusbar.cmd"
+CARD_BG = "#f8fafc"
+TEXT_FG = "#0f172a"
+MUTED_FG = "#64748b"
+DETAIL_FG = "#475569"
+BUTTON_BG = "#e2e8f0"
+BUTTON_HOVER_BG = "#cbd5e1"
+BUTTON_SUBTLE_BG = "#f1f5f9"
+BUTTON_SUBTLE_HOVER_BG = "#dbeafe"
+BUTTON_DANGER_HOVER_BG = "#fecaca"
+HEADER_FONT = ("Segoe UI", 10, "bold")
+BODY_FONT = ("Segoe UI", 8)
+ROW_TITLE_FONT = ("Segoe UI", 9, "bold")
+ICON_FONT = ("Segoe UI", 9, "bold")
 
 
 PALETTE = {
@@ -62,7 +75,7 @@ PALETTE = {
     "stale": ("#991b1b", "#fef2f2"),
     "completed": ("#15803d", "#f0fdf4"),
     "failed": ("#7f1d1d", "#fef2f2"),
-    "idle": ("#334155", "#f8fafc"),
+    "idle": ("#334155", CARD_BG),
 }
 
 
@@ -1350,26 +1363,26 @@ class StatusBarApp:
         self.root.minsize(720, 92)
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
-        self.root.configure(bg="#0f172a")
+        self.root.configure(bg=TEXT_FG)
         self._drag_start: tuple[int, int] | None = None
         self._last_render_signature: tuple[Any, ...] | None = None
         self.mini_mode = bool(self.ui_settings.get("mini_mode"))
         self.last_board: StatusBoard | None = None
         self.context_menu = tk.Menu(self.root, tearoff=0)
 
-        self.shell = tk.Frame(self.root, bg="#0f172a", padx=8, pady=8)
+        self.shell = tk.Frame(self.root, bg=TEXT_FG, padx=8, pady=8)
         self.shell.pack(fill="both", expand=True)
 
-        self.card = tk.Frame(self.shell, bg="#f8fafc", padx=10, pady=8)
+        self.card = tk.Frame(self.shell, bg=CARD_BG, padx=10, pady=8)
         self.card.pack(fill="both", expand=True)
 
         self.header_var = tk.StringVar(value="Starting Codex watcher")
         self.header = tk.Label(
             self.card,
             textvariable=self.header_var,
-            bg="#f8fafc",
-            fg="#0f172a",
-            font=("Segoe UI", 10, "bold"),
+            bg=CARD_BG,
+            fg=TEXT_FG,
+            font=HEADER_FONT,
             anchor="w",
         )
         self.header.grid(row=0, column=0, sticky="ew")
@@ -1378,79 +1391,45 @@ class StatusBarApp:
         self.summary = tk.Label(
             self.card,
             textvariable=self.summary_var,
-            bg="#f8fafc",
-            fg="#64748b",
-            font=("Segoe UI", 8),
+            bg=CARD_BG,
+            fg=MUTED_FG,
+            font=BODY_FONT,
             anchor="w",
         )
         self.summary.grid(row=1, column=0, sticky="ew", pady=(1, 5))
 
-        self.task_frame = tk.Frame(self.card, bg="#f8fafc")
+        self.task_frame = tk.Frame(self.card, bg=CARD_BG)
         self.task_frame.grid(row=2, column=0, columnspan=6, sticky="ew")
         self.task_rows: list[tk.Widget] = []
 
-        self.refresh_btn = tk.Button(
-            self.card,
-            text="Refresh",
-            command=self.refresh_now,
-            relief="flat",
-            bg="#e2e8f0",
-            fg="#0f172a",
-            activebackground="#cbd5e1",
-            font=("Segoe UI", 8),
-            padx=8,
-        )
+        self.refresh_btn = self._make_button("Refresh", self.refresh_now)
         self.refresh_btn.grid(row=0, column=1, rowspan=2, padx=(10, 4), sticky="e")
 
-        self.log_btn = tk.Button(
-            self.card,
-            text="Logs",
-            command=self.open_logs,
-            relief="flat",
-            bg="#e2e8f0",
-            fg="#0f172a",
-            activebackground="#cbd5e1",
-            font=("Segoe UI", 8),
-            padx=8,
-        )
+        self.log_btn = self._make_button("Logs", self.open_logs)
         self.log_btn.grid(row=0, column=2, rowspan=2, padx=(0, 4), sticky="e")
 
-        self.mini_btn = tk.Button(
-            self.card,
-            text="Full" if self.mini_mode else "Mini",
-            command=self.toggle_mini_mode,
-            relief="flat",
-            bg="#e2e8f0",
-            fg="#0f172a",
-            activebackground="#cbd5e1",
-            font=("Segoe UI", 8),
-            padx=8,
+        self.mini_btn = self._make_button(
+            "Full" if self.mini_mode else "Mini",
+            self.toggle_mini_mode,
         )
         self.mini_btn.grid(row=0, column=3, rowspan=2, padx=(0, 4), sticky="e")
 
-        self.tray_btn = tk.Button(
-            self.card,
-            text="_",
-            command=self.minimize_to_tray,
-            relief="flat",
-            bg="#f1f5f9",
-            fg="#475569",
-            activebackground="#dbeafe",
-            font=("Segoe UI", 9, "bold"),
+        self.tray_btn = self._make_button(
+            "-",
+            self.minimize_to_tray,
+            subtle=True,
             width=3,
+            font=ICON_FONT,
         )
         self.tray_btn.grid(row=0, column=4, rowspan=2, padx=(0, 4), sticky="e")
 
-        self.close_btn = tk.Button(
-            self.card,
-            text="x",
-            command=self.close,
-            relief="flat",
-            bg="#f1f5f9",
-            fg="#475569",
-            activebackground="#fecaca",
-            font=("Segoe UI", 9, "bold"),
+        self.close_btn = self._make_button(
+            "X",
+            self.close,
+            subtle=True,
+            danger=True,
             width=3,
+            font=ICON_FONT,
         )
         self.close_btn.grid(row=0, column=5, rowspan=2, sticky="ne")
 
@@ -1466,6 +1445,42 @@ class StatusBarApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
+
+    def _make_button(
+        self,
+        text: str,
+        command: Any,
+        *,
+        subtle: bool = False,
+        danger: bool = False,
+        width: int | None = None,
+        font: tuple[str, int] | tuple[str, int, str] = BODY_FONT,
+    ) -> tk.Button:
+        bg = BUTTON_SUBTLE_BG if subtle else BUTTON_BG
+        hover_bg = BUTTON_DANGER_HOVER_BG if danger else (
+            BUTTON_SUBTLE_HOVER_BG if subtle else BUTTON_HOVER_BG
+        )
+        button = tk.Button(
+            self.card,
+            text=text,
+            command=command,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            bg=bg,
+            fg=TEXT_FG if not subtle else DETAIL_FG,
+            activebackground=hover_bg,
+            activeforeground=TEXT_FG,
+            font=font,
+            padx=10 if width is None else 0,
+            pady=3,
+            width=width or 0,
+            cursor="hand2",
+            takefocus=0,
+        )
+        button.bind("<Enter>", lambda _event: button.configure(bg=hover_bg))
+        button.bind("<Leave>", lambda _event: button.configure(bg=bg))
+        return button
 
     def start_drag(self, event: tk.Event[Any]) -> None:
         self._drag_start = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
@@ -1634,8 +1649,8 @@ class StatusBarApp:
             row,
             text=self._task_title(snapshot),
             bg=bg,
-            fg="#0f172a",
-            font=("Segoe UI", 9, "bold"),
+            fg=TEXT_FG,
+            font=ROW_TITLE_FONT,
             anchor="w",
         )
         title.grid(row=0, column=1, sticky="ew")
@@ -1644,8 +1659,8 @@ class StatusBarApp:
             row,
             text=self._task_detail(snapshot),
             bg=bg,
-            fg="#475569",
-            font=("Segoe UI", 8),
+            fg=DETAIL_FG,
+            font=BODY_FONT,
             anchor="w",
         )
         detail.grid(row=1, column=1, sticky="ew")
@@ -1654,8 +1669,8 @@ class StatusBarApp:
             row,
             text=self._task_meta(snapshot),
             bg=bg,
-            fg="#64748b",
-            font=("Segoe UI", 8),
+            fg=MUTED_FG,
+            font=BODY_FONT,
             anchor="e",
         )
         meta.grid(row=0, column=2, rowspan=2, sticky="e", padx=(10, 0))
