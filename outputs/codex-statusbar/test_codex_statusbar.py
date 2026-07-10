@@ -29,6 +29,7 @@ from codex_statusbar import (
     mini_header_text,
     parse_args,
     render_autostart_cmd,
+    status_surface_colors,
     tray_tooltip_text,
     windows_startup_dir,
 )
@@ -186,8 +187,12 @@ class MultiSessionBoardTests(unittest.TestCase):
     def test_saved_window_position_is_clamped_to_visible_screen(self) -> None:
         self.assertEqual(clamp_window_position(100, 120, 1920, 1080), (100, 120))
         self.assertEqual(clamp_window_position(-500, -40, 1920, 1080), (16, 16))
-        self.assertEqual(clamp_window_position(5000, 3000, 1920, 1080), (1144, 932))
+        self.assertEqual(clamp_window_position(5000, 3000, 1920, 1080), (1184, 948))
         self.assertEqual(clamp_window_position(50, 50, 0, 0), (30, 30))
+
+    def test_status_surface_uses_neutral_background_with_state_accent(self) -> None:
+        self.assertEqual(status_surface_colors("completed"), ("#15803d", "#ffffff"))
+        self.assertEqual(status_surface_colors("unknown"), ("#334155", "#ffffff"))
 
     def test_mini_header_shows_state_summary_and_count(self) -> None:
         self.assertEqual(mini_header_text("working", "Thinking", 2), "Working (2)")
@@ -199,10 +204,10 @@ class MultiSessionBoardTests(unittest.TestCase):
         self.assertEqual(mini_header_text("custom", "Custom state", -1), "Custom state (0)")
 
     def test_full_window_height_grows_with_visible_sessions(self) -> None:
-        self.assertEqual(full_window_geometry_for_count(0), "760x132")
-        self.assertEqual(full_window_geometry_for_count(1), "760x132")
-        self.assertEqual(full_window_geometry_for_count(3), "760x204")
-        self.assertEqual(full_window_geometry_for_count(20), "760x384")
+        self.assertEqual(full_window_geometry_for_count(0), "720x116")
+        self.assertEqual(full_window_geometry_for_count(1), "720x116")
+        self.assertEqual(full_window_geometry_for_count(3), "720x196")
+        self.assertEqual(full_window_geometry_for_count(20), "720x396")
 
     def test_scan_all_keeps_multiple_active_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

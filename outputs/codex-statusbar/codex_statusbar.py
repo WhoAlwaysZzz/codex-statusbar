@@ -34,10 +34,10 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 
 APP_NAME = "Codex Statusbar"
-FULL_WINDOW_WIDTH = 760
-FULL_WINDOW_MIN_HEIGHT = 132
-FULL_WINDOW_ROW_HEIGHT = 36
-FULL_WINDOW_MAX_HEIGHT = 384
+FULL_WINDOW_WIDTH = 720
+FULL_WINDOW_MIN_HEIGHT = 116
+FULL_WINDOW_ROW_HEIGHT = 40
+FULL_WINDOW_MAX_HEIGHT = 396
 FULL_WINDOW_GEOMETRY = f"{FULL_WINDOW_WIDTH}x{FULL_WINDOW_MIN_HEIGHT}"
 MINI_WINDOW_GEOMETRY = "230x42"
 DEFAULT_STALE_SECONDS = 300
@@ -50,7 +50,8 @@ MAX_FILE_BYTES = 1_500_000
 MAX_VISIBLE_SESSIONS = 8
 MAX_DISPLAY_CHARS = 20
 AUTOSTART_FILE_NAME = "codex-statusbar.cmd"
-CARD_BG = "#f8fafc"
+WINDOW_BG = "#e2e8f0"
+CARD_BG = "#ffffff"
 TEXT_FG = "#0f172a"
 MUTED_FG = "#64748b"
 DETAIL_FG = "#475569"
@@ -150,6 +151,11 @@ def tray_tooltip_text(
         needs_human=needs_human,
     )
     return f"{APP_NAME}: {summary}"
+
+
+def status_surface_colors(state: str) -> tuple[str, str]:
+    accent, _ = PALETTE.get(state, PALETTE["idle"])
+    return accent, CARD_BG
 
 
 def always_on_top_label(enabled: bool) -> str:
@@ -1453,22 +1459,25 @@ class StatusBarApp:
         self.root = tk.Tk()
         self.root.title(APP_NAME)
         self.root.geometry(self._initial_position())
-        self.root.minsize(720, 92)
+        self.root.minsize(680, 80)
         self.always_on_top = self._load_bool_setting("always_on_top", default=True)
         self.root.attributes("-topmost", self.always_on_top)
         self.root.overrideredirect(True)
-        self.root.configure(bg=TEXT_FG)
+        self.root.configure(bg=WINDOW_BG)
         self._drag_start: tuple[int, int] | None = None
         self._last_render_signature: tuple[Any, ...] | None = None
         self.mini_mode = bool(self.ui_settings.get("mini_mode"))
         self.last_board: StatusBoard | None = None
         self.context_menu = tk.Menu(self.root, tearoff=0)
 
-        self.shell = tk.Frame(self.root, bg=TEXT_FG, padx=8, pady=8)
+        self.shell = tk.Frame(self.root, bg=WINDOW_BG)
         self.shell.pack(fill="both", expand=True)
 
-        self.card = tk.Frame(self.shell, bg=CARD_BG, padx=10, pady=8)
-        self.card.pack(fill="both", expand=True)
+        self.accent_bar = tk.Frame(self.shell, bg=TEXT_FG, width=4)
+        self.accent_bar.pack(side="left", fill="y")
+
+        self.card = tk.Frame(self.shell, bg=CARD_BG, padx=12, pady=8)
+        self.card.pack(side="right", fill="both", expand=True)
 
         self.header_var = tk.StringVar(value="Starting Codex watcher")
         self.header = tk.Label(
@@ -1527,11 +1536,18 @@ class StatusBarApp:
         )
         self.close_btn.grid(row=0, column=5, rowspan=2, sticky="ne")
 
-        self.card.grid_columnconfigure(0, weight=1, minsize=380)
+        self.card.grid_columnconfigure(0, weight=1, minsize=340)
         for column in range(1, 6):
             self.card.grid_columnconfigure(column, weight=0)
         self.task_frame.grid_columnconfigure(0, weight=1)
-        for widget in [self.shell, self.card, self.header, self.summary, self.task_frame]:
+        for widget in [
+            self.shell,
+            self.accent_bar,
+            self.card,
+            self.header,
+            self.summary,
+            self.task_frame,
+        ]:
             self._bind_window_controls(widget)
 
         self.tray = WindowsTrayIcon(self)
@@ -1670,8 +1686,10 @@ class StatusBarApp:
             )
         )
 
-        color, bg = PALETTE.get(board.primary.state, PALETTE["idle"])
-        self.shell.configure(bg=color)
+        color, bg = status_surface_colors(board.primary.state)
+        self.root.configure(bg=WINDOW_BG)
+        self.shell.configure(bg=WINDOW_BG)
+        self.accent_bar.configure(bg=color)
         self.card.configure(bg=bg)
         self.task_frame.configure(bg=bg)
         for label in [self.header, self.summary]:
@@ -1738,8 +1756,8 @@ class StatusBarApp:
         self.task_frame.grid()
         self.refresh_btn.grid()
         self.log_btn.grid()
-        self.card.grid_columnconfigure(0, minsize=380)
-        self.root.minsize(720, 92)
+        self.card.grid_columnconfigure(0, minsize=340)
+        self.root.minsize(680, 80)
         self.root.update_idletasks()
         self.root.geometry(full_window_geometry_for_count(session_count))
 
