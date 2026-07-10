@@ -16,7 +16,13 @@ Start-Process codex-stat
 
 窗口会常驻置顶，可以拖动。`X` 会隐藏到系统托盘；从窗口或托盘图标右键菜单选择 `Exit` 才会真正退出。托盘图标悬停时会显示当前状态和 session 数量。它只读取本地文件，不会自动发送消息、切代理、审批命令或修改 Codex 配置。
 
-如果本目录已经在 PATH 里，也可以直接：
+首次使用可以从仓库根目录运行安装脚本。它只将本目录添加到当前用户 PATH，不需要管理员权限：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\outputs\codex-statusbar\install.ps1
+```
+
+之后可以直接：
 
 ```powershell
 codex-stat

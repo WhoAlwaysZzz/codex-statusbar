@@ -20,11 +20,23 @@ outputs/codex-statusbar
 
 ## Quick Start
 
-From `outputs/codex-statusbar` after adding that folder to `PATH`:
+Install the launchers for the current Windows user (no administrator rights):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\outputs\codex-statusbar\install.ps1
+```
+
+Then open a new terminal and run:
 
 ```powershell
 Start-Process codex-stat
 Start-Process -WindowStyle Hidden codex-watchdog
+```
+
+To undo only the PATH change:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\outputs\codex-statusbar\install.ps1 -RemovePath
 ```
 
 For more commands, see:

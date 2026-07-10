@@ -76,6 +76,18 @@ class AutostartTests(unittest.TestCase):
             default_homes.assert_not_called()
 
 
+class InstallerScriptTests(unittest.TestCase):
+    def test_installer_is_user_scoped_and_reversible(self) -> None:
+        script_path = Path(__file__).resolve().parent / "install.ps1"
+        text = script_path.read_text(encoding="utf-8")
+
+        self.assertIn("SupportsShouldProcess", text)
+        self.assertIn("[switch]$RemovePath", text)
+        self.assertIn('SetEnvironmentVariable("Path", $updatedPath, "User")', text)
+        self.assertIn("codex-stat.exe", text)
+        self.assertIn("codex-watchdog.exe", text)
+
+
 class StatusbarInstanceTests(unittest.TestCase):
     def test_first_statusbar_launch_writes_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
