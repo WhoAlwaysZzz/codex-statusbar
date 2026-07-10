@@ -35,11 +35,14 @@ except ImportError:  # pragma: no cover - non-Windows fallback
 
 APP_NAME = "Codex Statusbar"
 FULL_WINDOW_WIDTH = 720
-FULL_WINDOW_MIN_HEIGHT = 116
-FULL_WINDOW_ROW_HEIGHT = 40
-FULL_WINDOW_MAX_HEIGHT = 396
+FULL_WINDOW_MIN_HEIGHT = 168
+FULL_WINDOW_ROW_HEIGHT = 56
+FULL_WINDOW_MAX_HEIGHT = 560
 FULL_WINDOW_GEOMETRY = f"{FULL_WINDOW_WIDTH}x{FULL_WINDOW_MIN_HEIGHT}"
-MINI_WINDOW_GEOMETRY = "230x42"
+MINI_WINDOW_WIDTH = 270
+MINI_WINDOW_HEIGHT = 42
+MINI_HEADER_MIN_WIDTH = 110
+MINI_WINDOW_GEOMETRY = f"{MINI_WINDOW_WIDTH}x{MINI_WINDOW_HEIGHT}"
 DEFAULT_STALE_SECONDS = 300
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_DESKTOP_EVENT_SECONDS = 180
@@ -147,6 +150,11 @@ def full_window_geometry_for_count(session_count: int) -> str:
 
 def initial_window_geometry(x: int, y: int) -> str:
     return f"{FULL_WINDOW_GEOMETRY}+{x}+{y}"
+
+
+def mini_window_geometry() -> str:
+    """Keep the state label and the three window controls visible in mini mode."""
+    return MINI_WINDOW_GEOMETRY
 
 
 def mini_header_text(
@@ -1811,7 +1819,7 @@ class StatusBarApp:
         self.log_btn.grid_remove()
         self.header.grid()
         count = len(board.snapshots)
-        self.card.grid_columnconfigure(0, minsize=72)
+        self.card.grid_columnconfigure(0, minsize=MINI_HEADER_MIN_WIDTH)
         self.header.configure(anchor="center")
         self.header_var.set(
             mini_header_text(
@@ -1821,8 +1829,8 @@ class StatusBarApp:
                 needs_human=board.primary.needs_human,
             )
         )
-        self.root.minsize(230, 42)
-        self.root.geometry(MINI_WINDOW_GEOMETRY)
+        self.root.minsize(MINI_WINDOW_WIDTH, MINI_WINDOW_HEIGHT)
+        self.root.geometry(mini_window_geometry())
 
     def _show_full_widgets(self, session_count: int) -> None:
         self.header.grid()
@@ -1832,7 +1840,7 @@ class StatusBarApp:
         self.refresh_btn.grid()
         self.log_btn.grid()
         self.card.grid_columnconfigure(0, minsize=340)
-        self.root.minsize(680, 80)
+        self.root.minsize(FULL_WINDOW_WIDTH, FULL_WINDOW_MIN_HEIGHT)
         self.root.update_idletasks()
         self.root.geometry(full_window_geometry_for_count(session_count))
 

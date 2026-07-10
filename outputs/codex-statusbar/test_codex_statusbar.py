@@ -30,6 +30,7 @@ from codex_statusbar import (
     initial_window_geometry,
     main,
     mini_header_text,
+    mini_window_geometry,
     parse_args,
     render_autostart_cmd,
     statusbar_launch_command,
@@ -186,8 +187,8 @@ class WindowControlTests(unittest.TestCase):
             self.assertFalse(enable_windows_dpi_awareness())
 
     def test_initial_window_geometry_uses_full_statusbar_size(self) -> None:
-        self.assertEqual(initial_window_geometry(30, 30), "720x116+30+30")
-        self.assertEqual(initial_window_geometry(1184, 948), "720x116+1184+948")
+        self.assertEqual(initial_window_geometry(30, 30), "720x168+30+30")
+        self.assertEqual(initial_window_geometry(1184, 896), "720x168+1184+896")
 
     def test_start_hidden_cli_flag_is_opt_in(self) -> None:
         self.assertFalse(parse_args([]).start_hidden)
@@ -254,7 +255,7 @@ class MultiSessionBoardTests(unittest.TestCase):
     def test_saved_window_position_is_clamped_to_visible_screen(self) -> None:
         self.assertEqual(clamp_window_position(100, 120, 1920, 1080), (100, 120))
         self.assertEqual(clamp_window_position(-500, -40, 1920, 1080), (16, 16))
-        self.assertEqual(clamp_window_position(5000, 3000, 1920, 1080), (1184, 948))
+        self.assertEqual(clamp_window_position(5000, 3000, 1920, 1080), (1184, 896))
         self.assertEqual(clamp_window_position(50, 50, 0, 0), (30, 30))
 
     def test_status_surface_uses_neutral_background_with_state_accent(self) -> None:
@@ -271,10 +272,13 @@ class MultiSessionBoardTests(unittest.TestCase):
         self.assertEqual(mini_header_text("custom", "Custom state", -1), "Custom state (0)")
 
     def test_full_window_height_grows_with_visible_sessions(self) -> None:
-        self.assertEqual(full_window_geometry_for_count(0), "720x116")
-        self.assertEqual(full_window_geometry_for_count(1), "720x116")
-        self.assertEqual(full_window_geometry_for_count(3), "720x196")
-        self.assertEqual(full_window_geometry_for_count(20), "720x396")
+        self.assertEqual(full_window_geometry_for_count(0), "720x168")
+        self.assertEqual(full_window_geometry_for_count(1), "720x168")
+        self.assertEqual(full_window_geometry_for_count(3), "720x280")
+        self.assertEqual(full_window_geometry_for_count(20), "720x560")
+
+    def test_mini_window_leaves_room_for_the_longest_state_label_and_controls(self) -> None:
+        self.assertEqual(mini_window_geometry(), "270x42")
 
     def test_scan_all_keeps_multiple_active_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
