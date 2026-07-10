@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from codex_statusbar import (
     CodexSessionWatcher,
+    RefreshGate,
     StatusBarApp,
     StatusSnapshot,
     StatusbarInstanceGuard,
@@ -154,6 +155,16 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class WindowControlTests(unittest.TestCase):
+    def test_refresh_gate_runs_at_most_one_pending_scan(self) -> None:
+        gate = RefreshGate()
+
+        self.assertTrue(gate.begin())
+        self.assertFalse(gate.begin())
+        self.assertFalse(gate.begin())
+        self.assertTrue(gate.finish())
+        self.assertTrue(gate.begin())
+        self.assertFalse(gate.finish())
+
     def test_start_hidden_hides_only_when_the_tray_is_available(self) -> None:
         app = object.__new__(StatusBarApp)
         app.root = Mock()

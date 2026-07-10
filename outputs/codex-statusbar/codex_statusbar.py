@@ -116,6 +116,28 @@ class StatusBoard:
     updated_at: str
 
 
+# Coalesces slow scans so polling cannot race older results back into the UI.
+class RefreshGate:
+    def __init__(self) -> None:
+        self._scanning = False
+        self._pending = False
+
+    def begin(self) -> bool:
+        if self._scanning:
+            self._pending = True
+            return False
+        self._scanning = True
+        return True
+
+    def finish(self) -> bool:
+        if not self._scanning:
+            return False
+        self._scanning = False
+        pending = self._pending
+        self._pending = False
+        return pending
+
+
 def full_window_geometry_for_count(session_count: int) -> str:
     visible_count = max(1, min(session_count, MAX_VISIBLE_SESSIONS))
     height = FULL_WINDOW_MIN_HEIGHT + ((visible_count - 1) * FULL_WINDOW_ROW_HEIGHT)
@@ -1503,6 +1525,7 @@ class StatusBarApp:
         self.root.configure(bg=WINDOW_BG)
         self._drag_start: tuple[int, int] | None = None
         self._last_render_signature: tuple[Any, ...] | None = None
+        self.refresh_gate = RefreshGate()
         self.mini_mode = bool(self.ui_settings.get("mini_mode"))
         self.start_hidden = start_hidden
         self.last_board: StatusBoard | None = None
@@ -1684,6 +1707,10 @@ class StatusBarApp:
         self.show_from_tray()
 
     def refresh_now(self) -> None:
+        if not self.refresh_gate.begin():
+            return
+        self.refresh_btn.configure(state="disabled")
+
         def worker() -> None:
             try:
                 board = self.watcher.scan_all()
@@ -1706,9 +1733,18 @@ class StatusBarApp:
                     snapshots=[snapshot],
                     updated_at=now_iso(),
                 )
-            self.root.after(0, lambda: self.render_board(board))
+            self.root.after(0, lambda: self._finish_refresh(board))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_refresh(self, board: StatusBoard) -> None:
+        try:
+            self.render_board(board)
+        finally:
+            if self.refresh_gate.finish():
+                self.refresh_now()
+            else:
+                self.refresh_btn.configure(state="normal")
 
     def render_board(self, board: StatusBoard) -> None:
         signature = self._render_signature(board)
