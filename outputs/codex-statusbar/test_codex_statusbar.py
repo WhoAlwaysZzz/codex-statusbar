@@ -182,13 +182,23 @@ class WindowControlTests(unittest.TestCase):
 
         self.assertEqual(tray.tooltip, "x" * 127)
 
-    def test_window_close_hides_to_tray_without_exiting(self) -> None:
+    def test_window_close_exits_after_confirmation(self) -> None:
         app = object.__new__(StatusBarApp)
-        app.minimize_to_tray = Mock()
+        app.exit_app = Mock()
 
-        app.handle_window_close()
+        with patch("codex_statusbar.messagebox.askyesno", return_value=True):
+            app.handle_window_close()
 
-        app.minimize_to_tray.assert_called_once_with()
+        app.exit_app.assert_called_once_with()
+
+    def test_window_close_keeps_running_when_exit_is_declined(self) -> None:
+        app = object.__new__(StatusBarApp)
+        app.exit_app = Mock()
+
+        with patch("codex_statusbar.messagebox.askyesno", return_value=False):
+            app.handle_window_close()
+
+        app.exit_app.assert_not_called()
 
     def test_reset_window_position_restores_default_and_persists_it(self) -> None:
         app = object.__new__(StatusBarApp)

@@ -1903,7 +1903,11 @@ class StatusBarApp:
         self.root.withdraw()
 
     def handle_window_close(self) -> None:
-        self.minimize_to_tray()
+        if messagebox.askyesno(
+            APP_NAME,
+            "Exit Codex Statusbar?\n\nMonitoring will stop until it is started again.",
+        ):
+            self.exit_app()
 
     def show_from_tray(self) -> None:
         self.root.deiconify()
