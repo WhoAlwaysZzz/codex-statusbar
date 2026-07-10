@@ -8,11 +8,12 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from codex_statusbar import (
     CodexSessionWatcher,
+    StatusBarApp,
     StatusSnapshot,
     StatusbarInstanceGuard,
     _wsl_distro_names,
@@ -129,6 +130,18 @@ class StatusbarInstanceTests(unittest.TestCase):
             self.assertTrue(guard.acquired)
             self.assertFalse(guard.owns_pid_file)
             self.assertFalse((state_dir / "statusbar.pid").exists())
+
+
+class WindowControlTests(unittest.TestCase):
+    def test_reset_window_position_restores_default_and_persists_it(self) -> None:
+        app = object.__new__(StatusBarApp)
+        app.root = Mock()
+        app._save_ui_settings = Mock()
+
+        app.reset_window_position()
+
+        app.root.geometry.assert_called_once_with("+30+30")
+        app._save_ui_settings.assert_called_once_with()
 
 
 class MultiSessionBoardTests(unittest.TestCase):

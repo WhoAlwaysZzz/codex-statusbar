@@ -442,6 +442,7 @@ class WindowsTrayIcon:
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1002, mode_label)
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1004, "Refresh")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1005, "Logs")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, 1008, "Reset window position")
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1007, always_on_top_label(self.app.always_on_top))
             win32gui.AppendMenu(menu, win32con.MF_STRING, 1006, self.app.autostart_label())
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
@@ -476,6 +477,9 @@ class WindowsTrayIcon:
         elif command_id == 1005:
             self.app.show_from_tray()
             self.app.open_logs()
+        elif command_id == 1008:
+            self.app.show_from_tray()
+            self.app.reset_window_position()
         elif command_id == 1006:
             self.app.toggle_autostart()
         elif command_id == 1007:
@@ -1558,6 +1562,7 @@ class StatusBarApp:
         self.context_menu.add_command(label="Refresh", command=self.refresh_now)
         self.context_menu.add_command(label=mode_label, command=self.toggle_mini_mode)
         self.context_menu.add_command(label="Hide to tray", command=self.minimize_to_tray)
+        self.context_menu.add_command(label="Reset window position", command=self.reset_window_position)
         self.context_menu.add_command(label="Open logs", command=self.open_logs)
         self.context_menu.add_command(label=always_on_top_label(self.always_on_top), command=self.toggle_always_on_top)
         self.context_menu.add_command(label=self.autostart_label(), command=self.toggle_autostart)
@@ -1804,6 +1809,11 @@ class StatusBarApp:
         self.root.deiconify()
         self.root.lift()
         self.root.attributes("-topmost", self.always_on_top)
+
+    def reset_window_position(self) -> None:
+        self.root.geometry("+30+30")
+        self.root.update_idletasks()
+        self._save_ui_settings()
 
     def toggle_always_on_top(self) -> None:
         self.set_always_on_top(not self.always_on_top)
