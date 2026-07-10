@@ -23,8 +23,10 @@ from codex_statusbar import (
     clamp_window_position,
     disable_autostart,
     discover_wsl_codex_homes,
+    enable_windows_dpi_awareness,
     enable_autostart,
     full_window_geometry_for_count,
+    initial_window_geometry,
     main,
     mini_header_text,
     parse_args,
@@ -148,6 +150,14 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class WindowControlTests(unittest.TestCase):
+    def test_dpi_awareness_is_a_noop_outside_windows(self) -> None:
+        with patch("codex_statusbar.os.name", "posix"):
+            self.assertFalse(enable_windows_dpi_awareness())
+
+    def test_initial_window_geometry_uses_full_statusbar_size(self) -> None:
+        self.assertEqual(initial_window_geometry(30, 30), "720x116+30+30")
+        self.assertEqual(initial_window_geometry(1184, 948), "720x116+1184+948")
+
     def test_tray_tooltip_summarizes_state_and_attention(self) -> None:
         self.assertEqual(
             tray_tooltip_text("working", "Thinking", 2),

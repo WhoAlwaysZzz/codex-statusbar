@@ -123,6 +123,10 @@ def full_window_geometry_for_count(session_count: int) -> str:
     return f"{FULL_WINDOW_WIDTH}x{height}"
 
 
+def initial_window_geometry(x: int, y: int) -> str:
+    return f"{FULL_WINDOW_GEOMETRY}+{x}+{y}"
+
+
 def mini_header_text(
     state: str,
     label: str,
@@ -223,6 +227,38 @@ def process_is_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+# Must run before creating Tk so widget geometry matches native window coordinates.
+def enable_windows_dpi_awareness() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+    except (ImportError, OSError):
+        return False
+
+    set_context = getattr(user32, "SetProcessDpiAwarenessContext", None)
+    if set_context is not None:
+        try:
+            if set_context(ctypes.c_void_p(-4)):
+                return True
+        except (AttributeError, OSError, TypeError):
+            pass
+
+    try:
+        shcore = ctypes.WinDLL("shcore", use_last_error=True)
+        if shcore.SetProcessDpiAwareness(2) == 0:
+            return True
+    except (AttributeError, OSError, TypeError):
+        pass
+
+    try:
+        return bool(user32.SetProcessDPIAware())
+    except (AttributeError, OSError, TypeError):
+        return False
 
 
 def windows_startup_dir(appdata: str | None = None) -> Path | None:
@@ -1905,8 +1941,8 @@ class StatusBarApp:
                 self.root.winfo_screenwidth(),
                 self.root.winfo_screenheight(),
             )
-            return f"+{safe_x}+{safe_y}"
-        return "+30+30"
+            return initial_window_geometry(safe_x, safe_y)
+        return initial_window_geometry(30, 30)
 
     def _load_ui_settings(self) -> dict[str, Any]:
         try:
@@ -2118,6 +2154,7 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
+        enable_windows_dpi_awareness()
         app = StatusBarApp(
             watcher,
             poll_seconds=max(0.5, args.poll_seconds),
