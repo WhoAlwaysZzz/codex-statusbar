@@ -470,7 +470,7 @@ class WindowsTrayIcon:
             self.app.show_from_tray()
             self.app.toggle_mini_mode()
         elif command_id == 1003:
-            self.app.close()
+            self.app.exit_app()
         elif command_id == 1004:
             self.app.show_from_tray()
             self.app.refresh_now()
@@ -1484,7 +1484,7 @@ class StatusBarApp:
 
         self.close_btn = self._make_button(
             "X",
-            self.close,
+            self.handle_window_close,
             subtle=True,
             danger=True,
             width=3,
@@ -1501,7 +1501,7 @@ class StatusBarApp:
 
         self.tray = WindowsTrayIcon(self)
         self.tray.install()
-        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.root.protocol("WM_DELETE_WINDOW", self.handle_window_close)
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
 
@@ -1567,7 +1567,7 @@ class StatusBarApp:
         self.context_menu.add_command(label=always_on_top_label(self.always_on_top), command=self.toggle_always_on_top)
         self.context_menu.add_command(label=self.autostart_label(), command=self.toggle_autostart)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Exit", command=self.close)
+        self.context_menu.add_command(label="Exit", command=self.exit_app)
         self.context_menu.tk_popup(event.x_root, event.y_root)
         self.context_menu.grab_release()
 
@@ -1805,6 +1805,9 @@ class StatusBarApp:
     def minimize_to_tray(self) -> None:
         self.root.withdraw()
 
+    def handle_window_close(self) -> None:
+        self.minimize_to_tray()
+
     def show_from_tray(self) -> None:
         self.root.deiconify()
         self.root.lift()
@@ -1823,7 +1826,7 @@ class StatusBarApp:
         self.root.attributes("-topmost", enabled)
         self._save_ui_settings()
 
-    def close(self) -> None:
+    def exit_app(self) -> None:
         self._save_ui_settings()
         if self.instance_guard:
             self.instance_guard.release()

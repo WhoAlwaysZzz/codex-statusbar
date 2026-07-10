@@ -133,6 +133,14 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class WindowControlTests(unittest.TestCase):
+    def test_window_close_hides_to_tray_without_exiting(self) -> None:
+        app = object.__new__(StatusBarApp)
+        app.minimize_to_tray = Mock()
+
+        app.handle_window_close()
+
+        app.minimize_to_tray.assert_called_once_with()
+
     def test_reset_window_position_restores_default_and_persists_it(self) -> None:
         app = object.__new__(StatusBarApp)
         app.root = Mock()
