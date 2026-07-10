@@ -136,6 +136,22 @@ def mini_header_text(
     return f"{summary} ({max(0, session_count)})"
 
 
+def tray_tooltip_text(
+    state: str,
+    label: str,
+    session_count: int,
+    *,
+    needs_human: bool = False,
+) -> str:
+    summary = mini_header_text(
+        state,
+        label,
+        session_count,
+        needs_human=needs_human,
+    )
+    return f"{APP_NAME}: {summary}"
+
+
 def always_on_top_label(enabled: bool) -> str:
     return "Disable always on top" if enabled else "Enable always on top"
 
@@ -353,6 +369,7 @@ class WindowsTrayIcon:
         self.message_id = win32con.WM_USER + 20 if win32con else 0
         self.class_name = f"CodexStatusbarTray-{uuid.uuid4()}"
         self.icon_handle: int | None = None
+        self.tooltip = APP_NAME
 
     def install(self) -> None:
         if not self.available:
@@ -398,12 +415,30 @@ class WindowsTrayIcon:
             flags,
             self.message_id,
             self.icon_handle,
-            APP_NAME,
+            self.tooltip,
         )
         try:
             win32gui.Shell_NotifyIcon(win32gui.NIM_ADD, nid)
         except win32gui.error:
             win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
+
+    def update_tooltip(self, text: str) -> None:
+        self.tooltip = text[:127]
+        if not self.available or not self.hwnd:
+            return
+        assert win32gui is not None and win32con is not None
+        nid = (
+            self.hwnd,
+            0,
+            win32gui.NIF_TIP,
+            self.message_id,
+            self.icon_handle,
+            self.tooltip,
+        )
+        try:
+            win32gui.Shell_NotifyIcon(win32gui.NIM_MODIFY, nid)
+        except win32gui.error:
+            pass
 
     def remove(self) -> None:
         if not self.available or not self.hwnd:
@@ -1626,6 +1661,14 @@ class StatusBarApp:
             return
         self._last_render_signature = signature
         self.last_board = board
+        self.tray.update_tooltip(
+            tray_tooltip_text(
+                board.primary.state,
+                board.primary.label,
+                len(board.snapshots),
+                needs_human=board.primary.needs_human,
+            )
+        )
 
         color, bg = PALETTE.get(board.primary.state, PALETTE["idle"])
         self.shell.configure(bg=color)

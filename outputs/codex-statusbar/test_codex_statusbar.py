@@ -16,6 +16,7 @@ from codex_statusbar import (
     StatusBarApp,
     StatusSnapshot,
     StatusbarInstanceGuard,
+    WindowsTrayIcon,
     _wsl_distro_names,
     always_on_top_label,
     autostart_enabled,
@@ -28,6 +29,7 @@ from codex_statusbar import (
     mini_header_text,
     parse_args,
     render_autostart_cmd,
+    tray_tooltip_text,
     windows_startup_dir,
 )
 
@@ -133,6 +135,30 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class WindowControlTests(unittest.TestCase):
+    def test_tray_tooltip_summarizes_state_and_attention(self) -> None:
+        self.assertEqual(
+            tray_tooltip_text("working", "Thinking", 2),
+            "Codex Statusbar: Working (2)",
+        )
+        self.assertEqual(
+            tray_tooltip_text("waiting", "Waiting approval", 1, needs_human=True),
+            "Codex Statusbar: Attention (1)",
+        )
+        self.assertEqual(
+            tray_tooltip_text("custom", "Custom state", -1),
+            "Codex Statusbar: Custom state (0)",
+        )
+
+    def test_tray_tooltip_update_is_safe_without_windows_shell(self) -> None:
+        tray = object.__new__(WindowsTrayIcon)
+        tray.available = False
+        tray.hwnd = None
+        tray.tooltip = "old"
+
+        tray.update_tooltip("x" * 130)
+
+        self.assertEqual(tray.tooltip, "x" * 127)
+
     def test_window_close_hides_to_tray_without_exiting(self) -> None:
         app = object.__new__(StatusBarApp)
         app.minimize_to_tray = Mock()
