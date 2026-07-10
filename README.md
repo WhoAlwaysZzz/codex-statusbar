@@ -69,6 +69,8 @@ Runtime state, local logs, Python caches, and build outputs are ignored. Do not 
 - local Codex session transcripts
 - tokens or credentials
 
+See [SECURITY.md](SECURITY.md) for safe log sharing and vulnerability reporting.
+
 ## Development
 
 Run tests:
