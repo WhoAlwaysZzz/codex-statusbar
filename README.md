@@ -33,6 +33,8 @@ Start-Process codex-stat
 Start-Process -WindowStyle Hidden codex-watchdog
 ```
 
+The optional Windows autostart entry launches the statusbar directly into the system tray.
+
 To undo only the PATH change:
 
 ```powershell

@@ -283,10 +283,10 @@ def statusbar_launch_command() -> list[str]:
     script_dir = Path(__file__).resolve().parent
     bundled_launcher = script_dir / "codex-stat.exe"
     if bundled_launcher.exists():
-        return [str(bundled_launcher)]
+        return [str(bundled_launcher), "--start-hidden"]
     if getattr(sys, "frozen", False):
-        return [sys.executable]
-    return [sys.executable, str(Path(__file__).resolve())]
+        return [sys.executable, "--start-hidden"]
+    return [sys.executable, str(Path(__file__).resolve()), "--start-hidden"]
 
 
 def render_autostart_cmd(command: list[str] | None = None) -> str:
@@ -1486,6 +1486,7 @@ class StatusBarApp:
         watcher: CodexSessionWatcher,
         poll_seconds: float,
         instance_guard: StatusbarInstanceGuard | None = None,
+        start_hidden: bool = False,
     ) -> None:
         self.watcher = watcher
         self.poll_seconds = poll_seconds
@@ -1503,6 +1504,7 @@ class StatusBarApp:
         self._drag_start: tuple[int, int] | None = None
         self._last_render_signature: tuple[Any, ...] | None = None
         self.mini_mode = bool(self.ui_settings.get("mini_mode"))
+        self.start_hidden = start_hidden
         self.last_board: StatusBoard | None = None
         self.context_menu = tk.Menu(self.root, tearoff=0)
 
@@ -1589,6 +1591,7 @@ class StatusBarApp:
         self.tray = WindowsTrayIcon(self)
         self.tray.install()
         self.root.protocol("WM_DELETE_WINDOW", self.handle_window_close)
+        self.hide_on_startup_if_possible()
         self.refresh_now()
         self.root.after(int(self.poll_seconds * 1000), self.tick)
 
@@ -1902,6 +1905,10 @@ class StatusBarApp:
     def minimize_to_tray(self) -> None:
         self.root.withdraw()
 
+    def hide_on_startup_if_possible(self) -> None:
+        if self.start_hidden and self.tray.available:
+            self.root.withdraw()
+
     def handle_window_close(self) -> None:
         if messagebox.askyesno(
             APP_NAME,
@@ -2093,6 +2100,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--stale-seconds", type=int, default=DEFAULT_STALE_SECONDS)
     parser.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
     parser.add_argument(
+        "--start-hidden",
+        action="store_true",
+        help="Start in the system tray when tray support is available.",
+    )
+    parser.add_argument(
         "--once",
         action="store_true",
         help="Scan once, print status JSON, and exit without opening the UI.",
@@ -2163,6 +2175,7 @@ def main(argv: list[str]) -> int:
             watcher,
             poll_seconds=max(0.5, args.poll_seconds),
             instance_guard=instance_guard,
+            start_hidden=args.start_hidden,
         )
         app.run()
     finally:

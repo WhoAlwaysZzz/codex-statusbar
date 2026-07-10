@@ -31,6 +31,7 @@ from codex_statusbar import (
     mini_header_text,
     parse_args,
     render_autostart_cmd,
+    statusbar_launch_command,
     status_surface_colors,
     tray_tooltip_text,
     windows_startup_dir,
@@ -38,6 +39,9 @@ from codex_statusbar import (
 
 
 class AutostartTests(unittest.TestCase):
+    def test_default_autostart_command_starts_hidden(self) -> None:
+        self.assertEqual(statusbar_launch_command()[-1], "--start-hidden")
+
     def test_windows_startup_dir_uses_appdata(self) -> None:
         path = windows_startup_dir("C:/Users/demo/AppData/Roaming")
 
@@ -150,6 +154,22 @@ class StatusbarInstanceTests(unittest.TestCase):
 
 
 class WindowControlTests(unittest.TestCase):
+    def test_start_hidden_hides_only_when_the_tray_is_available(self) -> None:
+        app = object.__new__(StatusBarApp)
+        app.root = Mock()
+        app.tray = Mock(available=True)
+        app.start_hidden = True
+
+        app.hide_on_startup_if_possible()
+
+        app.root.withdraw.assert_called_once_with()
+
+        app.root.reset_mock()
+        app.tray.available = False
+        app.hide_on_startup_if_possible()
+
+        app.root.withdraw.assert_not_called()
+
     def test_dpi_awareness_is_a_noop_outside_windows(self) -> None:
         with patch("codex_statusbar.os.name", "posix"):
             self.assertFalse(enable_windows_dpi_awareness())
@@ -157,6 +177,10 @@ class WindowControlTests(unittest.TestCase):
     def test_initial_window_geometry_uses_full_statusbar_size(self) -> None:
         self.assertEqual(initial_window_geometry(30, 30), "720x116+30+30")
         self.assertEqual(initial_window_geometry(1184, 948), "720x116+1184+948")
+
+    def test_start_hidden_cli_flag_is_opt_in(self) -> None:
+        self.assertFalse(parse_args([]).start_hidden)
+        self.assertTrue(parse_args(["--start-hidden"]).start_hidden)
 
     def test_tray_tooltip_summarizes_state_and_attention(self) -> None:
         self.assertEqual(
