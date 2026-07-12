@@ -317,6 +317,69 @@ class MultiSessionBoardTests(unittest.TestCase):
             session_ids = {snapshot.session_id for snapshot in board.snapshots}
             self.assertEqual(session_ids, {"session-a", "session-b"})
 
+    def test_cli_sessions_skip_desktop_log_enrichment(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            codex_home = root / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "12"
+            session_dir.mkdir(parents=True)
+            self._write_session(
+                session_dir / "rollout-cli.jsonl",
+                "cli",
+                "working",
+                originator="codex-tui",
+            )
+            self._write_session(
+                session_dir / "rollout-desktop.jsonl",
+                "desktop",
+                "working",
+                originator="Codex Desktop",
+            )
+
+            watcher = CodexSessionWatcher(codex_home, root / "state")
+            watcher._desktop_snapshot = Mock(return_value=None)
+
+            watcher.scan_all()
+
+            watcher._desktop_snapshot.assert_called_once()
+            desktop_snapshot = watcher._desktop_snapshot.call_args.args[0]
+            self.assertEqual(desktop_snapshot.originator, "Codex Desktop")
+
+    def test_large_session_keeps_originator_from_initial_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            session_path = root / "rollout-large.jsonl"
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            rows = [
+                {
+                    "timestamp": timestamp,
+                    "type": "session_meta",
+                    "payload": {"cwd": "C:/demo", "originator": "Codex Desktop"},
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "response_item",
+                    "payload": {"type": "message", "role": "user", "content": "x" * 500},
+                },
+                {
+                    "timestamp": timestamp,
+                    "type": "event_msg",
+                    "payload": {"type": "task_started"},
+                },
+            ]
+            session_path.write_text(
+                "\n".join(json.dumps(row) for row in rows) + "\n",
+                encoding="utf-8",
+            )
+            watcher = CodexSessionWatcher(root, root / "state")
+
+            with patch("codex_statusbar.MAX_FILE_BYTES", 200):
+                snapshot = watcher._snapshot_for_file(session_path)
+
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(snapshot.originator, "Codex Desktop")
+            self.assertEqual(snapshot.cwd, "C:/demo")
+
     def test_explicit_codex_home_arguments_are_preserved(self) -> None:
         args = parse_args(["--codex-home", "C:/a/.codex", "--codex-home", "C:/b/.codex"])
 
@@ -411,12 +474,17 @@ class MultiSessionBoardTests(unittest.TestCase):
         state: str,
         *,
         seconds_ago: int = 1,
+        originator: str = "codex-tui",
     ) -> None:
         timestamp = (
             datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)
         ).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         rows = [
-            {"timestamp": timestamp, "type": "session_meta", "payload": {"cwd": str(path.parent)}},
+            {
+                "timestamp": timestamp,
+                "type": "session_meta",
+                "payload": {"cwd": str(path.parent), "originator": originator},
+            },
             {
                 "timestamp": timestamp,
                 "type": "event_msg",

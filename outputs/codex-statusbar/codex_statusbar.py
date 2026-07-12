@@ -110,6 +110,7 @@ class StatusSnapshot:
     needs_human: bool = False
     recommended_action: str | None = None
     error_info: str | None = None
+    originator: str | None = None
 
 
 @dataclass
@@ -647,7 +648,23 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
             continue
         if isinstance(value, dict):
             rows.append(value)
+    if not any(row.get("type") == "session_meta" for row in rows):
+        initial = _read_initial_session_metadata(path)
+        if initial is not None:
+            rows.insert(0, initial)
     return rows
+
+
+def _read_initial_session_metadata(path: Path) -> dict[str, Any] | None:
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline()
+        value = json.loads(first_line.decode("utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(value, dict) and value.get("type") == "session_meta":
+        return value
+    return None
 
 
 def session_id_from_path(path: Path) -> str:
@@ -707,9 +724,10 @@ class CodexSessionWatcher:
         for path in files:
             snapshot = self._snapshot_for_file(path)
             if snapshot:
-                desktop_snapshot = self._desktop_snapshot(snapshot)
-                if desktop_snapshot:
-                    snapshot = desktop_snapshot
+                if self._is_desktop_session(snapshot):
+                    desktop_snapshot = self._desktop_snapshot(snapshot)
+                    if desktop_snapshot:
+                        snapshot = desktop_snapshot
                 candidates.append(snapshot)
 
         if not candidates:
@@ -843,6 +861,7 @@ class CodexSessionWatcher:
 
         session_id = session_id_from_path(path)
         cwd: str | None = None
+        originator: str | None = None
         last_type: str | None = None
         last_payload_type: str | None = None
         last_ts: datetime | None = None
@@ -866,6 +885,9 @@ class CodexSessionWatcher:
                 cwd_value = payload.get("cwd")
                 if isinstance(cwd_value, str) and cwd_value:
                     cwd = cwd_value
+                originator_value = payload.get("originator")
+                if isinstance(originator_value, str) and originator_value:
+                    originator = originator_value
 
             if row_type == "event_msg":
                 payload_type = str(payload.get("type") or "")
@@ -963,7 +985,11 @@ class CodexSessionWatcher:
             needs_human=needs_human,
             recommended_action=action,
             error_info=error_info,
+            originator=originator,
         )
+
+    def _is_desktop_session(self, snapshot: StatusSnapshot) -> bool:
+        return (snapshot.originator or "").strip().casefold() == "codex desktop"
 
     def _desktop_snapshot(self, base: StatusSnapshot | None) -> StatusSnapshot | None:
         internal = self._internal_log_snapshot(base)
@@ -1035,6 +1061,7 @@ class CodexSessionWatcher:
                     needs_human=False,
                     recommended_action="Network/proxy path is unstable; wait briefly or switch proxy node.",
                     error_info=text[:500],
+                    originator=base.originator if base else "Codex Desktop",
                 )
             if self._is_internal_human_blocker(target_text, level_text, text, base):
                 return StatusSnapshot(
@@ -1050,6 +1077,7 @@ class CodexSessionWatcher:
                     needs_human=True,
                     recommended_action="Open Codex and handle login/quota/permission.",
                     error_info=text[:500],
+                    originator=base.originator if base else "Codex Desktop",
                 )
         return None
 
@@ -1084,6 +1112,7 @@ class CodexSessionWatcher:
                         needs_human=False,
                         recommended_action="Network/proxy path is unstable; wait briefly or switch proxy node.",
                         error_info=line[:500],
+                        originator=base.originator if base else "Codex Desktop",
                     )
         return None
 
